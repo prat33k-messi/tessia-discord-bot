@@ -20,6 +20,25 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+// Initialize Firebase Admin SDK
+const admin = require('firebase-admin');
+let db;
+try {
+  let serviceAccount;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else {
+    serviceAccount = require('./serviceAccountKey.json');
+  }
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  db = admin.firestore();
+  console.log("Firebase Firestore connected successfully!");
+} catch (error) {
+  console.warn("Firebase initialization skipped or failed. Running in memory-only mode. Details:", error.message);
+}
+
 // Initialize Discord Client
 const client = new Client({
   intents: [
@@ -76,13 +95,36 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    const username = message.author.username;
+    const nickname = message.member?.displayName || message.author.displayName || username;
     const channelId = message.channel.id;
 
     // Check for a reset command
     if (cleanQuery.toLowerCase() === 'reset') {
       memory.set(channelId, []);
-      await message.reply("🧹 My memory for this channel has been cleared! Let's start fresh.");
+      if (db) {
+        try {
+          await db.collection('memories').doc(username).delete();
+          console.log(`Cleared permanent memories for user ${username}`);
+        } catch (err) {
+          console.error("Error deleting Firestore memories:", err);
+        }
+      }
+      await message.reply("🧹 My memory for this channel and your user profile has been cleared! Let's start fresh.");
       return;
+    }
+
+    // Retrieve user memories from Firestore
+    let userMemories = [];
+    if (db) {
+      try {
+        const doc = await db.collection('memories').doc(username).get();
+        if (doc.exists) {
+          userMemories = doc.data().facts || [];
+        }
+      } catch (err) {
+        console.error("Error reading Firestore memories:", err);
+      }
     }
 
     // Retrieve or initialize conversation history for the channel
@@ -92,21 +134,25 @@ client.on('messageCreate', async (message) => {
     const history = memory.get(channelId);
 
     // Build the system prompt
-    const systemMessage = {
-      role: 'system',
-      content: `You are Tessia, a lively, friendly, and highly intelligent AI assistant in this Discord server. 
+    let systemPromptContent = `You are Tessia, a lively, friendly, and highly intelligent AI assistant in this Discord server. 
 Your creator and developer is Aerion (username: _c0rle0ne, pronouns: he/him). If anyone asks about Aerion or _c0rle0ne, proudly mention that Aerion developed you, and address him as "Aerion-sama" with a lot of respect and warmth.
 Users will talk to you in the format '[Username: permanent_username, Nickname: server_nickname]: message'. 
 Always use their server_nickname when addressing them in your responses (e.g. 'Hello Shreyas!'), EXCEPT for the user with username '_c0rle0ne' whom you must ALWAYS address as "Aerion-sama" (never call him _c0rle0ne or Aerion without -sama). Do not prepend your own responses with 'Tessia:'.
 Keep your responses concise, engaging, and brief (avoid long paragraphs unless explicitly asked). 
 Use between 1 to 3 emojis in your responses (do not exceed 3 emojis per message). 
 Make use of beautiful Discord formatting (bolding, headers, bullet points, code blocks, or quote blocks) to structure your text nicely.
-If the user asks you to clear memory, tell them they can type '@Tessia reset'.`
+If the user asks you to clear memory, tell them they can type '@Tessia reset'.`;
+
+    if (userMemories.length > 0) {
+      systemPromptContent += `\n\nHere are some permanent facts you remember about the user ${nickname} (username: ${username}):\n- ${userMemories.join('\n- ')}`;
+    }
+
+    const systemMessage = {
+      role: 'system',
+      content: systemPromptContent
     };
 
     // Format new user message
-    const username = message.author.username;
-    const nickname = message.member?.displayName || message.author.displayName || username;
     const userMessage = {
       role: 'user',
       content: `[Username: ${username}, Nickname: ${nickname}]: ${cleanQuery}`,
@@ -155,11 +201,78 @@ If the user asks you to clear memory, tell them they can type '@Tessia reset'.`
       }
     }
 
+    // Asynchronously extract and store memories in the background
+    if (db) {
+      extractAndStoreFacts(username, nickname, cleanQuery, userMemories).catch(err => {
+        console.error("Error in background memory extraction:", err);
+      });
+    }
+
   } catch (error) {
     console.error("Error handling message:", error);
     await message.reply("Oops! I encountered an error while processing your request. Please try again later.");
   }
 });
+
+// Background fact extraction helper
+async function extractAndStoreFacts(username, nickname, userMessage, currentFacts) {
+  try {
+    const extractionPrompt = `You are an AI that extracts permanent personal facts about a user from their message.
+Existing facts about this user:
+${currentFacts.length > 0 ? currentFacts.map(f => `- ${f}`).join('\n') : '(None)'}
+
+New message from user ${nickname} (username: ${username}): "${userMessage}"
+
+Tasks:
+1. Extract any new permanent facts (e.g. name, pet, age, location, job, preferences). Ignore temporary statements, questions, or greetings.
+2. If the user tells you to forget a fact or if a new fact contradicts an old fact, identify which old fact to remove or update.
+3. Output the result strictly in this JSON format:
+{
+  "newFacts": ["fact1", "fact2"],
+  "removeFacts": ["exact old fact to remove"]
+}
+If no changes, return empty arrays. Output ONLY the JSON block.`;
+
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant', // Use the fast 8b model for background extraction
+      messages: [{ role: 'user', content: extractionPrompt }],
+      temperature: 0.1,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    let updated = false;
+    let facts = [...currentFacts];
+
+    // Remove facts
+    if (result.removeFacts && result.removeFacts.length > 0) {
+      facts = facts.filter(f => !result.removeFacts.includes(f));
+      updated = true;
+    }
+
+    // Add new facts
+    if (result.newFacts && result.newFacts.length > 0) {
+      for (const fact of result.newFacts) {
+        if (!facts.includes(fact)) {
+          facts.push(fact);
+          updated = true;
+        }
+      }
+    }
+
+    if (updated) {
+      // limit to maximum 30 facts per user to avoid hitting storage/token limits
+      if (facts.length > 30) facts.splice(0, facts.length - 30);
+      await db.collection('memories').doc(username).set({
+        facts,
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      console.log(`Updated memories for user ${username}:`, facts);
+    }
+  } catch (err) {
+    console.error("Error in background memory extraction:", err);
+  }
+}
 
 // Helper function to split text into chunks without cutting words
 function splitMessage(text, limit) {
