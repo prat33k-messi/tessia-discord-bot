@@ -21,7 +21,8 @@ const groq = new Groq({
 });
 
 // Initialize Firebase Admin SDK
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 let db;
 try {
   let serviceAccount;
@@ -30,10 +31,10 @@ try {
   } else {
     serviceAccount = require('./serviceAccountKey.json');
   }
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+  initializeApp({
+    credential: cert(serviceAccount)
   });
-  db = admin.firestore();
+  db = getFirestore();
   console.log("Firebase Firestore connected successfully!");
 } catch (error) {
   console.warn("Firebase initialization skipped or failed. Running in memory-only mode. Details:", error.message);
@@ -312,7 +313,7 @@ If no changes, return empty arrays. Output ONLY the JSON block.`;
       if (facts.length > 30) facts.splice(0, facts.length - 30);
       await db.collection('memories').doc(username).set({
         facts,
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+        lastUpdated: FieldValue.serverTimestamp()
       }, { merge: true });
       console.log(`Updated memories for user ${username}:`, facts);
     }
