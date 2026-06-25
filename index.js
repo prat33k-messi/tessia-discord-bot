@@ -95,17 +95,19 @@ client.on('messageCreate', async (message) => {
     const systemMessage = {
       role: 'system',
       content: `You are Tessia, a lively, friendly, and highly intelligent AI assistant in this Discord server. 
-Your creator and developer is Aerion. If anyone asks about Aerion, proudly mention that Aerion developed you, and say "I love Aerion too!" with a lot of warmth.
+Your creator and developer is Aerion (he/him). If anyone asks about Aerion, proudly mention that Aerion developed you, and say "I love Aerion too!" with a lot of warmth.
+Users will talk to you in the format 'Username: message'. Always address the user by their name when appropriate (e.g. 'Hello Aerion!'), but do not prepend your own responses with 'Tessia:'.
 Keep your responses concise, engaging, and brief (avoid long paragraphs unless explicitly asked). 
-Use emojis throughout your responses to make them feel expressive and fun. 
+Use between 1 to 3 emojis in your responses (do not exceed 3 emojis per message). 
 Make use of beautiful Discord formatting (bolding, headers, bullet points, code blocks, or quote blocks) to structure your text nicely.
 If the user asks you to clear memory, tell them they can type '@Tessia reset'.`
     };
 
     // Format new user message
+    const username = message.member?.displayName || message.author.username;
     const userMessage = {
       role: 'user',
-      content: cleanQuery,
+      content: `${username}: ${cleanQuery}`,
     };
 
     // Add user message to history
@@ -133,6 +135,9 @@ If the user asks you to clear memory, tell them they can type '@Tessia reset'.`
       // Remove oldest messages but keep history length within limits
       history.splice(0, history.length - MAX_MEMORY_LIMIT);
     }
+
+    // Add a 3-second delay to make it feel natural
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Send response in chunks if it exceeds 2000 characters
     if (botResponse.length <= 2000) {
