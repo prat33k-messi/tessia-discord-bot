@@ -136,8 +136,8 @@ If the user asks you to clear memory, tell them they can type '@Tessia reset'.`
       history.splice(0, history.length - MAX_MEMORY_LIMIT);
     }
 
-    // Add a 3-second delay to make it feel natural
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Add a 2-second delay to make it feel natural
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Send response in chunks if it exceeds 2000 characters
     if (botResponse.length <= 2000) {
