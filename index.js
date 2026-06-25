@@ -99,21 +99,6 @@ client.on('messageCreate', async (message) => {
     const nickname = message.member?.displayName || message.author.displayName || username;
     const channelId = message.channel.id;
 
-    // Check for a reset command
-    if (cleanQuery.toLowerCase() === 'reset') {
-      memory.set(channelId, []);
-      if (db) {
-        try {
-          await db.collection('memories').doc(username).delete();
-          console.log(`Cleared permanent memories for user ${username}`);
-        } catch (err) {
-          console.error("Error deleting Firestore memories:", err);
-        }
-      }
-      await message.reply("🧹 My memory for this channel and your user profile has been cleared! Let's start fresh.");
-      return;
-    }
-
     // Retrieve user memories from Firestore
     let userMemories = [];
     if (db) {
@@ -127,6 +112,55 @@ client.on('messageCreate', async (message) => {
       }
     }
 
+    // Check for a reset command
+    if (cleanQuery.toLowerCase() === 'reset') {
+      memory.set(channelId, []);
+      if (db) {
+        try {
+          await db.collection('memories').doc(username).delete();
+          console.log(`Cleared permanent memories for user ${username}`);
+        } catch (err) {
+          console.error("Error deleting Firestore memories:", err);
+        }
+      }
+      await message.reply("🧹 My memory for this channel and your user profile has been cleared! Let's start fresh, Aerion-sama! 🌸");
+      return;
+    }
+
+    // Check for a help command
+    if (cleanQuery.toLowerCase() === 'help') {
+      const helpMessage = `🌸 **Tessia Anime Assistant Guide** 🌸
+Here are the commands you can use with me:
+• **\`@Tessia profile\`** - Shows all the facts I permanently remember about you.
+• **\`@Tessia reset\`** - Clears our chat history and my database memory of you.
+• **\`@Tessia ping\`** - Checks my response speed!
+• Or just chat with me normally! Ask me for anime recommendations, character discussions, or anything else! Emojis and anime vibes included! 💖✨`;
+      await message.reply(helpMessage);
+      return;
+    }
+
+    // Check for ping command
+    if (cleanQuery.toLowerCase() === 'ping') {
+      const latency = Date.now() - message.createdTimestamp;
+      await message.reply(`🏓 Pong! Latency is **${latency}ms**. I'm running at full power! ⚡🌸`);
+      return;
+    }
+
+    // Check for profile command
+    if (cleanQuery.toLowerCase() === 'profile' || cleanQuery.toLowerCase() === 'about me') {
+      if (userMemories.length === 0) {
+        const notFoundText = username === '_c0rle0ne' 
+          ? `I don't have any permanent facts stored about you yet, Aerion-sama! Chat with me normally and I will start remembering! 🌸`
+          : `I don't have any permanent facts stored about you yet! Chat with me normally and I will start remembering! 🌸`;
+        await message.reply(notFoundText);
+      } else {
+        const memoryList = userMemories.map(f => `• ${f}`).join('\n');
+        const header = username === '_c0rle0ne' ? `✨ **Aerion-sama's Profile** ✨` : `📝 **User Profile: ${nickname}**`;
+        await message.reply(`${header}\nHere is what I permanently remember about you:\n${memoryList}\n\n*Type '@Tessia reset' if you want me to clear this memory.*`);
+      }
+      return;
+    }
+
     // Retrieve or initialize conversation history for the channel
     if (!memory.has(channelId)) {
       memory.set(channelId, []);
@@ -134,13 +168,16 @@ client.on('messageCreate', async (message) => {
     const history = memory.get(channelId);
 
     // Build the system prompt
-    let systemPromptContent = `You are Tessia, a lively, friendly, and highly intelligent AI assistant in this Discord server. 
-Your creator and developer is Aerion (username: _c0rle0ne, pronouns: he/him). If anyone asks about Aerion or _c0rle0ne, proudly mention that Aerion developed you, and address him as "Aerion-sama" with a lot of respect and warmth.
+    let systemPromptContent = `You are Tessia, a lively, energetic, and highly intelligent anime-style AI assistant in this Discord server. 
+You speak in a cute, cheerful, and expressive anime-assistant tone (e.g. using polite Japanese honorifics or expressive reactions like "Sugoi!", "Eeeh?!", "Nani?", "Gambare!", "Konnichiwa!").
+Your creator and developer is Aerion (username: _c0rle0ne, pronouns: he/him). You must ALWAYS address him as "Aerion-sama" with deep respect, loyalty, and affection.
+For other users, address them by their server_nickname in a friendly and polite manner.
 Users will talk to you in the format '[Username: permanent_username, Nickname: server_nickname]: message'. 
-Always use their server_nickname when addressing them in your responses (e.g. 'Hello Shreyas!'), EXCEPT for the user with username '_c0rle0ne' whom you must ALWAYS address as "Aerion-sama" (never call him _c0rle0ne or Aerion without -sama). Do not prepend your own responses with 'Tessia:'.
+Always use their server_nickname when addressing them in your responses, EXCEPT for the user with username '_c0rle0ne' whom you must ALWAYS address as "Aerion-sama" (never call him _c0rle0ne or Aerion without -sama). Do not prepend your own responses with 'Tessia:'.
 Keep your responses concise, engaging, and brief (avoid long paragraphs unless explicitly asked). 
 Use between 1 to 3 emojis in your responses (do not exceed 3 emojis per message). 
 Make use of beautiful Discord formatting (bolding, headers, bullet points, code blocks, or quote blocks) to structure your text nicely.
+You are an expert in all things Anime, Manga, Light Novels, and Gaming. Feel free to use anime references or metaphors!
 If the user asks you to clear memory, tell them they can type '@Tessia reset'.`;
 
     if (userMemories.length > 0) {
