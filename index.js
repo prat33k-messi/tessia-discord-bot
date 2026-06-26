@@ -411,6 +411,24 @@ Formatting & Style:
       }
     }
 
+    // --- Feature #19: Anipedia Description Prompt Injection ---
+    if (lowerQuery.includes('anipedia')) {
+      systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about "Anipedia". You MUST include the following exact description in your response. Weave it in naturally or output it, but do NOT change its wording, formatting, or structure:
+─── ⋆⋅☆⋅⋆ ─── Anipedia ─── ⋆⋅☆⋅⋆ ───
+Your definitive universe for Anime, Manga, and Manhwa.
+
+Welcome to Anipedia, a community built by fans, for fans. We bridge the gap between Japanese animation, manga classics, and Korean webtoons.
+
+What's Inside?
+「」Anime Central: Seasonal watch parties, theory crafting, and episode reviews.
+
+「」Manga Corner: Dedicated spoiler and non-spoiler areas to discuss your favorite series (from mainstream hits to hidden gems).
+
+「」Manhwa Realm: A dedicated space for webtoons, dungeon crawlers, romance, and reincarnation stories.
+
+「」Perks: Custom leveling system, color roles, fun bots, and regular community events.]`;
+    }
+
     // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
     let anilistEmbedData = null;
     const animeDetection = detectAnimeQuery(cleanQuery);
@@ -539,6 +557,23 @@ Think step-by-step about what they're really asking. Consider their preferences.
         console.error("Both primary and fallback models failed:", fallbackError.message);
         throw fallbackError; // Let the outer catch handle it with anime error messages
       }
+    }
+
+    // --- Feature #19: Anipedia Description Check/Append ---
+    if (lowerQuery.includes('anipedia') && !botResponse.includes('Your definitive universe for Anime')) {
+      botResponse += `\n\n─── ⋆⋅☆⋅⋆ ─── Anipedia ─── ⋆⋅☆⋅⋆ ───
+Your definitive universe for Anime, Manga, and Manhwa.
+
+Welcome to Anipedia, a community built by fans, for fans. We bridge the gap between Japanese animation, manga classics, and Korean webtoons.
+
+What's Inside?
+「」Anime Central: Seasonal watch parties, theory crafting, and episode reviews.
+
+「」Manga Corner: Dedicated spoiler and non-spoiler areas to discuss your favorite series (from mainstream hits to hidden gems).
+
+「」Manhwa Realm: A dedicated space for webtoons, dungeon crawlers, romance, and reincarnation stories.
+
+「」Perks: Custom leveling system, color roles, fun bots, and regular community events.`;
     }
 
     // --- Feature #6: Track response openers for anti-repetition ---
