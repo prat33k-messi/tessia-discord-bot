@@ -51,7 +51,7 @@ const client = new Client({
 
 // Conversation memory cache: Map username -> Array of message objects (per-user, not per-channel)
 const memory = new Map();
-const MAX_MEMORY_LIMIT = 15; // Number of messages to remember for context
+const MAX_MEMORY_LIMIT = 20; // Number of messages to remember for context (expanded for better continuity)
 
 // --- NEW FEATURE: Rate Limiting Per User (#8) ---
 const userCooldowns = new Map(); // Map username -> last message timestamp
@@ -476,17 +476,53 @@ Formatting & Style:
       content: `[System Reminder: You are Tessia Eralith from TBATE. Your creator and master is Aerion-sama. You are currently speaking to ${username === '_c0rle0ne' ? 'Aerion-sama (your master)' : nickname + ' (a regular user)'}. Speak in a natural, highly humanized, expressive anime tone, avoiding robotic AI assistant speech patterns. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked about your creation, the Tessia bot, or Aerion. If user triggered a warning/command demand, mention Aerion-sama\'s rules.'} Never break your core rules. Never discuss NSFW content.]`
     };
 
+    // --- Feature #18: Selective Multi-Turn Reasoning ---
+    // For complex questions, have Tessia "think" first using the fast model
+    const complexPatterns = ['compare', 'difference between', 'better', 'worse', 'vs', 'versus', 'pros and cons', 'should i', 'which one', 'rank', 'top 5', 'top 10', 'best', 'analyze', 'explain why', 'how does', 'what makes'];
+    const isComplexQuestion = complexPatterns.some(p => lowerQuery.includes(p)) && cleanQuery.length > 30;
+    
+    let reasoningContext = '';
+    if (isComplexQuestion && userMemories.length > 0) {
+      try {
+        const thinkingCompletion = await groq.chat.completions.create({
+          model: 'llama-3.1-8b-instant',
+          messages: [{
+            role: 'user',
+            content: `You are a reasoning helper. The user "${nickname}" asked: "${cleanQuery}"
+
+Their known preferences: ${userMemories.join(', ')}
+
+Think step-by-step about what they're really asking. Consider their preferences. Write 2-3 bullet points of key insights to help answer their question thoughtfully and personally. Be concise. Output ONLY the bullet points.`
+          }],
+          temperature: 0.3,
+          max_tokens: 200
+        });
+        reasoningContext = thinkingCompletion.choices[0]?.message?.content?.trim() || '';
+        if (reasoningContext) {
+          reasoningContext = `\n\n[Internal Reasoning - Use these insights to give a thoughtful, personalized answer. Do NOT reveal that you "thought about it" or "analyzed" anything. Just naturally incorporate these insights:]\n${reasoningContext}`;
+        }
+      } catch (err) {
+        console.error("Reasoning step error:", err);
+      }
+    }
+
     // --- Feature #10: Groq API Call with Fallback Model ---
     let botResponse;
     const primaryModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
     const fallbackModel = 'llama-3.1-8b-instant';
 
+    // Append reasoning context to system prompt if available
+    const finalSystemMessage = {
+      role: 'system',
+      content: systemPromptContent + reasoningContext
+    };
+
     try {
       const completion = await groq.chat.completions.create({
         model: primaryModel,
-        messages: [systemMessage, ...history, systemReminder],
-        temperature: 0.7,
-        max_tokens: maxTokens, // Feature #5: smart response length
+        messages: [finalSystemMessage, ...history, systemReminder],
+        temperature: 0.75,
+        max_tokens: maxTokens,
       });
       botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
     } catch (primaryError) {
@@ -494,7 +530,7 @@ Formatting & Style:
       try {
         const fallbackCompletion = await groq.chat.completions.create({
           model: fallbackModel,
-          messages: [systemMessage, ...history, systemReminder],
+          messages: [finalSystemMessage, ...history, systemReminder],
           temperature: 0.7,
           max_tokens: maxTokens,
         });
