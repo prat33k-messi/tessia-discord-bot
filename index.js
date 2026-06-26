@@ -429,6 +429,18 @@ What's Inside?
 「」Perks: Custom leveling system, color roles, fun bots, and regular community events.]`;
     }
 
+    // --- Feature #20: Purpose Prompt Injection ---
+    const purposeKeywords = ['purpose', 'what do you do', 'what is your role', 'what is your job', 'why are you here', 'what are you for', 'why were you created'];
+    const isAskingPurpose = purposeKeywords.some(k => lowerQuery.includes(k));
+    if (isAskingPurpose) {
+      systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about your purpose, role, or what you do. You MUST respond in your Tessia persona. Your response MUST follow this structure:
+1. Start with a warm introduction as Tessia.
+2. Explain that your purpose is to serve as the official bot of Anipedia.
+3. Mention that you are here to help all the people in this server.
+4. Mention that you can recommend anime, manga, and manhwa.
+5. Highlight your features (such as profile/memory tracking, customized recommendations, AniList integration, help commands, and general anime chat).]`;
+    }
+
     // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
     let anilistEmbedData = null;
     const animeDetection = detectAnimeQuery(cleanQuery);
