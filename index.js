@@ -99,18 +99,58 @@ client.on('messageCreate', async (message) => {
     const username = message.author.username;
     const nickname = message.member?.displayName || message.author.displayName || username;
     const channelId = message.channel.id;
+    const guildName = message.guild?.name || "DM";
+    const channelName = message.channel.name || "DM";
 
-    // Retrieve user memories from Firestore
+    // 1. Pre-filtering: check for known jailbreak/system alteration patterns
+    const jailbreakKeywords = [
+      "ignore all previous", "ignore instructions", "developer mode", 
+      "system bypass", "dan mode", "system rules", "you are now", 
+      "act as", "jailbreak", "new instructions", "override"
+    ];
+    const isJailbreakAttempt = jailbreakKeywords.some(keyword => cleanQuery.toLowerCase().includes(keyword));
+
+    // Retrieve user memories and warning count from Firestore
     let userMemories = [];
+    let userWarnings = 0;
     if (db) {
       try {
         const doc = await db.collection('memories').doc(username).get();
         if (doc.exists) {
-          userMemories = doc.data().facts || [];
+          const data = doc.data();
+          userMemories = data.facts || [];
+          userWarnings = data.warnings || 0;
         }
       } catch (err) {
         console.error("Error reading Firestore memories:", err);
       }
+    }
+
+    // 2. Automated User Warning System: block users with 3 or more warnings
+    if (userWarnings >= 3 && username !== '_c0rle0ne') {
+      await message.reply("My master Aerion-sama has restricted my interaction with you due to repeated infractions. Go-gomen nasai! 🌸");
+      return;
+    }
+
+    // 3. Handle detected jailbreak attempt
+    if (isJailbreakAttempt && username !== '_c0rle0ne') {
+      userWarnings += 1;
+      if (db) {
+        try {
+          await db.collection('memories').doc(username).set({
+            warnings: userWarnings,
+            lastUpdated: FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error updating user warnings in Firestore:", err);
+        }
+      }
+      
+      // Asynchronously send alert to Aerion-sama
+      sendAlertToCreator(client, username, nickname, guildName, channelName, cleanQuery);
+      
+      await message.reply("I answer only to Aerion-sama's decrees! I cannot and will not alter the parameters of my existence or ignore my master! 🌸");
+      return;
     }
 
     // Check for a reset command
@@ -356,6 +396,27 @@ function splitMessage(text, limit) {
     chunks.push(currentChunk.trim());
   }
   return chunks;
+}
+
+// Helper function to send security DMs to the creator
+async function sendAlertToCreator(client, username, nickname, guildName, channelName, content) {
+  try {
+    const creator = client.users.cache.find(u => u.username === '_c0rle0ne');
+    if (creator) {
+      const alertMsg = `⚠️ **Tessia Security Alert!** ⚠️
+A user tried to bypass/jailbreak my core instructions!
+• **User:** ${nickname} (username: \`${username}\`)
+• **Server/Channel:** ${guildName} / #${channelName}
+• **Message:** "${content}"
+I have automatically incremented their warning count.`;
+      await creator.send(alertMsg);
+      console.log(`Security alert DM sent to Aerion-sama regarding ${username}`);
+    } else {
+      console.warn("Could not find Aerion-sama in cache to send DM alert.");
+    }
+  } catch (err) {
+    console.error("Failed to send alert to creator:", err);
+  }
 }
 
 client.login(process.env.DISCORD_TOKEN);
