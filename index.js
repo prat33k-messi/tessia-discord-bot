@@ -411,6 +411,19 @@ Formatting & Style:
       }
     }
 
+    // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
+    const animeDetection = detectAnimeQuery(cleanQuery);
+    if (animeDetection) {
+      try {
+        const anilistData = await searchAniList(animeDetection.title, animeDetection.mediaType);
+        if (anilistData) {
+          systemPromptContent += `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer accurately. Weave it naturally into your response in your own personality. Do NOT copy-paste it raw. If the user asked for "full form" or abbreviation meaning, the title below IS the answer.]\n${anilistData}`;
+        }
+      } catch (err) {
+        console.error("AniList search error:", err);
+      }
+    }
+
     const systemMessage = {
       role: 'system',
       content: systemPromptContent
@@ -723,6 +736,216 @@ async function saveConversationSummary(username, history) {
   } catch (err) {
     console.error("Error generating/saving conversation summary:", err);
   }
+}
+
+// --- Feature #14: AniList API Integration for Anime/Manga/Manhwa ---
+// Common abbreviations and aliases that AniList might not recognize directly
+const ANIME_ALIASES = {
+  'orv': 'Omniscient Reader\'s Viewpoint',
+  'omniscient reader': 'Omniscient Reader\'s Viewpoint',
+  'sl': 'Solo Leveling',
+  'solo levelling': 'Solo Leveling',
+  'aot': 'Attack on Titan',
+  'snk': 'Shingeki no Kyojin',
+  'mha': 'My Hero Academia',
+  'bnha': 'Boku no Hero Academia',
+  'jjk': 'Jujutsu Kaisen',
+  'csm': 'Chainsaw Man',
+  'ds': 'Demon Slayer',
+  'kny': 'Kimetsu no Yaiba',
+  'op': 'One Piece',
+  'opm': 'One Punch Man',
+  'hxh': 'Hunter x Hunter',
+  'fmab': 'Fullmetal Alchemist: Brotherhood',
+  'fma': 'Fullmetal Alchemist',
+  'sao': 'Sword Art Online',
+  're zero': 'Re:Zero',
+  'rezero': 'Re:Zero',
+  'tbate': 'The Beginning After the End',
+  'tog': 'Tower of God',
+  'tot': 'Trash of the Count\'s Family',
+  'tocf': 'Trash of the Count\'s Family',
+  'cote': 'Classroom of the Elite',
+  'ttigraas': 'That Time I Got Reincarnated as a Slime',
+  'tensura': 'That Time I Got Reincarnated as a Slime',
+  'slime isekai': 'That Time I Got Reincarnated as a Slime',
+  'spy x family': 'SPY×FAMILY',
+  'spy family': 'SPY×FAMILY',
+  'dragon ball': 'Dragon Ball',
+  'dbz': 'Dragon Ball Z',
+  'dbs': 'Dragon Ball Super',
+  'naruto shippuden': 'Naruto Shippuuden',
+  'bc': 'Black Clover',
+  'overlord': 'Overlord',
+  'mushoku tensei': 'Mushoku Tensei',
+  'mt': 'Mushoku Tensei',
+  'dandadan': 'Dandadan',
+  'blue lock': 'Blue Lock',
+  'sakamoto days': 'Sakamoto Days',
+  'kagurabachi': 'Kagurabachi',
+  'wind breaker': 'Wind Breaker',
+  'oshi no ko': 'Oshi no Ko',
+  'onk': 'Oshi no Ko',
+  'frieren': 'Sousou no Frieren',
+  'vinland saga': 'Vinland Saga',
+  'berserk': 'Berserk',
+  'vagabond': 'Vagabond',
+  'kingdom': 'Kingdom',
+  'lookism': 'Lookism',
+  'eleceed': 'Eleceed',
+  'noblesse': 'Noblesse',
+  'the gamer': 'The Gamer',
+  'goat': 'God of Highschool',
+  'god of highschool': 'The God of High School',
+  'unordinary': 'unOrdinary',
+  'weak hero': 'Weak Hero',
+  'teenage mercenary': 'Mercenary Enrollment',
+};
+
+// AniList GraphQL query
+const ANILIST_QUERY = `
+query ($search: String, $type: MediaType) {
+  Media(search: $search, type: $type) {
+    title {
+      romaji
+      english
+      native
+    }
+    format
+    status
+    description(asHtml: false)
+    episodes
+    chapters
+    volumes
+    meanScore
+    averageScore
+    popularity
+    genres
+    season
+    seasonYear
+    startDate { year month day }
+    endDate { year month day }
+    studios(isMain: true) { nodes { name } }
+    source
+    countryOfOrigin
+    isAdult
+    siteUrl
+  }
+}
+`;
+
+async function searchAniList(searchTerm, mediaType = null) {
+  try {
+    // Resolve aliases first
+    const resolvedTerm = ANIME_ALIASES[searchTerm.toLowerCase()] || searchTerm;
+    
+    // If no specific type, try MANGA first (covers manga + manhwa + manhua), then ANIME
+    const typesToTry = mediaType ? [mediaType] : ['MANGA', 'ANIME'];
+    
+    for (const type of typesToTry) {
+      try {
+        const response = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ query: ANILIST_QUERY, variables: { search: resolvedTerm, type } })
+        });
+        
+        if (!response.ok) continue;
+        
+        const data = await response.json();
+        const media = data?.data?.Media;
+        
+        if (!media || media.isAdult) continue;
+        
+        // Build a clean info string
+        const title = media.title.english || media.title.romaji || media.title.native;
+        const country = media.countryOfOrigin;
+        const mediaFormat = country === 'KR' ? 'Manhwa' : country === 'CN' ? 'Manhua' : (type === 'ANIME' ? 'Anime' : 'Manga');
+        
+        let cleanDesc = media.description || 'No description available.';
+        // Strip HTML tags from description
+        cleanDesc = cleanDesc.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').substring(0, 500);
+        
+        let info = `📖 **AniList Data for "${title}"** (${mediaFormat}):\n`;
+        if (media.title.romaji && media.title.romaji !== title) info += `• Japanese Title: ${media.title.romaji}\n`;
+        if (media.title.native) info += `• Native Title: ${media.title.native}\n`;
+        info += `• Format: ${media.format || 'Unknown'} | Status: ${media.status || 'Unknown'}\n`;
+        info += `• Country: ${country === 'KR' ? 'South Korea (Manhwa)' : country === 'CN' ? 'China (Manhua)' : country === 'JP' ? 'Japan' : country || 'Unknown'}\n`;
+        if (media.episodes) info += `• Episodes: ${media.episodes}\n`;
+        if (media.chapters) info += `• Chapters: ${media.chapters}\n`;
+        if (media.volumes) info += `• Volumes: ${media.volumes}\n`;
+        if (media.meanScore) info += `• Score: ${media.meanScore}/100 (${(media.meanScore / 10).toFixed(1)}/10)\n`;
+        if (media.popularity) info += `• Popularity: ${media.popularity.toLocaleString()} users\n`;
+        if (media.genres && media.genres.length > 0) info += `• Genres: ${media.genres.join(', ')}\n`;
+        if (media.season && media.seasonYear) info += `• Season: ${media.season} ${media.seasonYear}\n`;
+        if (media.studios?.nodes?.length > 0) info += `• Studio: ${media.studios.nodes.map(s => s.name).join(', ')}\n`;
+        if (media.source) info += `• Source Material: ${media.source}\n`;
+        info += `• Synopsis: ${cleanDesc}\n`;
+        if (media.siteUrl) info += `• AniList URL: ${media.siteUrl}\n`;
+        
+        return info;
+      } catch (innerErr) {
+        continue; // Try next media type
+      }
+    }
+    
+    return null; // Nothing found
+  } catch (err) {
+    console.error('AniList search error:', err.message);
+    return null;
+  }
+}
+
+// Detect if a message is asking about an anime/manga/manhwa and extract the title
+function detectAnimeQuery(query) {
+  const lq = query.toLowerCase().trim();
+  
+  // Patterns that indicate the user is asking about an anime/manga/manhwa title
+  const askPatterns = [
+    /(?:tell\s+(?:me\s+)?about|what\s+is|what's|whats|who\s+is|describe|review|explain|info\s+(?:on|about)|information\s+(?:on|about)|details\s+(?:on|about)|synopsis\s+(?:of|for)|summary\s+(?:of|for)|plot\s+(?:of|for)|rating\s+(?:of|for)|score\s+(?:of|for)|episodes?\s+(?:of|in)|chapters?\s+(?:of|in)|recommend(?:ation)?|is\s+.+\s+good|is\s+.+\s+worth|should\s+i\s+(?:watch|read)|have\s+you\s+(?:watched|read|seen)|do\s+you\s+know|thoughts?\s+on|opinion\s+on|how\s+(?:is|was)|full\s+form\s+(?:of)?)\s+(.+)/i,
+  ];
+  
+  // Direct alias check first (e.g., just "orv" or "orv manhwa")
+  const mediaTypeWords = ['anime', 'manga', 'manhwa', 'manhua', 'webtoon', 'light novel', 'ln', 'series'];
+  let cleanedQuery = lq;
+  let detectedType = null;
+  
+  for (const mtw of mediaTypeWords) {
+    if (cleanedQuery.includes(mtw)) {
+      cleanedQuery = cleanedQuery.replace(new RegExp(`\\b${mtw}\\b`, 'gi'), '').trim();
+      if (mtw === 'anime') detectedType = 'ANIME';
+      else detectedType = 'MANGA'; // manga, manhwa, manhua, webtoon, LN all fall under MANGA type in AniList
+    }
+  }
+  
+  // Check if the cleaned query is a known alias
+  if (ANIME_ALIASES[cleanedQuery]) {
+    return { title: cleanedQuery, mediaType: detectedType };
+  }
+  
+  // Check the ask patterns
+  for (const pattern of askPatterns) {
+    const match = lq.match(pattern);
+    if (match && match[1]) {
+      let title = match[1].trim();
+      // Remove trailing question marks and common filler words
+      title = title.replace(/[?!.]+$/, '').replace(/\b(anime|manga|manhwa|manhua|webtoon|series|light novel|ln)\b/gi, '').trim();
+      if (title.length >= 2) {
+        return { title, mediaType: detectedType };
+      }
+    }
+  }
+  
+  // Check if any known alias appears in the message (for short messages)
+  if (lq.split(/\s+/).length <= 6) {
+    for (const alias of Object.keys(ANIME_ALIASES)) {
+      if (lq.includes(alias) && alias.length >= 2) {
+        return { title: alias, mediaType: detectedType };
+      }
+    }
+  }
+  
+  return null;
 }
 
 client.login(process.env.DISCORD_TOKEN);
