@@ -121,6 +121,12 @@ client.on('messageCreate', async (message) => {
     // Show typing status to let users know the bot is thinking
     await message.channel.sendTyping();
 
+    const username = message.author.username;
+    const nickname = message.member?.displayName || message.author.displayName || username;
+    const channelId = message.channel.id;
+    const guildName = message.guild?.name || "DM";
+    const channelName = message.channel.name || "DM";
+
     // Clean user query by removing the mention string
     let cleanQuery = message.content
       .replace(botMention, '')
@@ -128,15 +134,13 @@ client.on('messageCreate', async (message) => {
       .trim();
 
     if (!cleanQuery) {
-      await message.reply("Hello! How can I help you today? Mention me with a question to start chatting!");
+      if (username === '_c0rle0ne') {
+        await message.reply("Yes, Aerion-sama? 🌸 I'm here! What would you like to chat about? ✨");
+      } else {
+        await message.reply(`Hello, ${nickname}! 🌸 How can I help you today? Mention me with a question to start chatting! ✨`);
+      }
       return;
     }
-
-    const username = message.author.username;
-    const nickname = message.member?.displayName || message.author.displayName || username;
-    const channelId = message.channel.id;
-    const guildName = message.guild?.name || "DM";
-    const channelName = message.channel.name || "DM";
 
     // --- Feature #8: Rate Limiting Per User ---
     if (username !== '_c0rle0ne') { // Aerion-sama is exempt
