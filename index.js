@@ -136,22 +136,35 @@ client.on('messageCreate', async (message) => {
 
     let cleanQuery = originalCleanQuery;
 
-    // Handle empty mentions that are replies
+    // Handle empty mentions that are replies — only use referenced msg if it's NOT from the bot
     if (!cleanQuery && referencedMessage) {
-      const refCleaned = referencedMessage.content
-        .replace(botMention, '')
-        .replace(botNicknameMention, '')
-        .trim();
-      cleanQuery = refCleaned;
+      if (referencedMessage.author.id !== client.user.id) {
+        // Referenced message is from another user, use their text as context
+        const refCleaned = referencedMessage.content
+          .replace(botMention, '')
+          .replace(botNicknameMention, '')
+          .trim();
+        cleanQuery = refCleaned;
+      } else {
+        // Referenced message is Tessia's own reply — continue the conversation naturally
+        cleanQuery = '[continue the conversation naturally based on our chat history]';
+      }
     }
 
     if (!cleanQuery) {
-      if (username === '_c0rle0ne') {
-        await message.reply("Yes, Aerion-sama? 🌸 I'm here! What would you like to chat about? ✨");
+      // Check if user has existing conversation history
+      const existingHistory = memory.get(username);
+      if (existingHistory && existingHistory.length > 0) {
+        // They have history, continue the conversation
+        cleanQuery = '[continue the conversation naturally based on our chat history]';
       } else {
-        await message.reply(`Hello, ${nickname}! 🌸 How can I help you today? Mention me with a question to start chatting! ✨`);
+        if (username === '_c0rle0ne') {
+          await message.reply("Yes, Aerion-sama? 🌸 I'm here! What would you like to chat about? ✨");
+        } else {
+          await message.reply(`Hello, ${nickname}! 🌸 How can I help you today? Mention me with a question to start chatting! ✨`);
+        }
+        return;
       }
-      return;
     }
 
     // --- Feature #8: Rate Limiting Per User ---
@@ -510,28 +523,89 @@ Here's what we've got for you! 🌸
       systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about Emillia. Explain that you (Tessia) are Emillia's big sister. Mention that Tessia is for chatting and community features, while Emillia is for moderation and administrative duties. Keep it warm, polite, and under 3-4 lines.]`;
     }
 
-    // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
-    let anilistEmbedData = null;
-    let animeDetection = detectAnimeQuery(originalCleanQuery);
-    
-    // Fallback: If no title detected in user's query, but it is a reply, check the referenced message
-    if (!animeDetection && referencedMessage) {
-      const refCleaned = referencedMessage.content
-        .replace(botMention, '')
-        .replace(botNicknameMention, '')
-        .trim();
-      animeDetection = detectAnimeQuery(refCleaned);
-    }
-
-    if (animeDetection) {
+    // --- Feature #26: Airing Schedule Detection ---
+    let airingScheduleData = null;
+    const scheduleKeywords = ['airing today', 'airing this week', 'what\'s airing', 'whats airing', 'anime schedule', 'new episodes today', 'anime today', 'what anime is airing', 'anime airing today', 'episodes today', 'today\'s anime', 'what is airing'];
+    const isAskingSchedule = scheduleKeywords.some(k => lowerQuery.includes(k));
+    if (isAskingSchedule) {
       try {
-        const anilistResult = await searchAniList(animeDetection.title, animeDetection.mediaType);
-        if (anilistResult) {
-          systemPromptContent += `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer accurately. Weave it naturally into your response in your own Tessia personality. Do NOT copy-paste it raw. Do NOT mention "AniList" or any data source name. Present the info as if you personally know it. If the user asked for "full form" or abbreviation meaning, the title below IS the answer.]\n${anilistResult.contextText}`;
-          anilistEmbedData = anilistResult.embedData;
+        airingScheduleData = await getAiringSchedule();
+        if (airingScheduleData && airingScheduleData.length > 0) {
+          const scheduleText = airingScheduleData.map(a => `• ${a.title} — Episode ${a.episode} (airs at ${a.airingTime})`).join('\n');
+          systemPromptContent += `\n\n[REAL AIRING SCHEDULE DATA FOR TODAY — Use this verified data to answer. Present it naturally. Do NOT say you looked it up or mention any API/source.]\n${scheduleText}`;
+        } else {
+          systemPromptContent += `\n\n[AIRING SCHEDULE: No anime episodes are scheduled to air today based on verified data. Tell the user honestly that there are no new episodes airing today and suggest checking back tomorrow or recommend something from their watchlist.]`;
         }
       } catch (err) {
-        console.error("AniList search error:", err);
+        console.error("Airing schedule error:", err);
+      }
+    }
+
+    // --- Feature #27: Character Search Detection ---
+    let characterEmbedData = null;
+    const characterPatterns = [
+      /(?:show\s+(?:me\s+)?(?:a\s+)?(?:picture|pic|image|photo|img)\s+(?:of\s+)?)(.*)/i,
+      /(?:picture|pic|image|photo)\s+(?:of\s+)(.*)/i,
+      /(?:what\s+does\s+)(.*?)(?:\s+look\s+like)/i,
+    ];
+    let characterSearchName = null;
+    for (const pattern of characterPatterns) {
+      const match = cleanQuery.match(pattern);
+      if (match && match[1]) {
+        characterSearchName = match[1].replace(/[?!.]+$/, '').trim();
+        break;
+      }
+    }
+    if (characterSearchName && characterSearchName.length >= 2) {
+      try {
+        characterEmbedData = await searchAniListCharacter(characterSearchName);
+        if (characterEmbedData) {
+          systemPromptContent += `\n\n[CHARACTER DATA FOUND — The user asked about "${characterSearchName}". Here is real data. Present it naturally as if you know it personally. A character image embed will be attached automatically, so do NOT say you cannot show images. Instead, briefly introduce the character.]\nName: ${characterEmbedData.name}\nFrom: ${characterEmbedData.mediaTitle}\nDescription: ${characterEmbedData.description}`;
+        }
+      } catch (err) {
+        console.error("Character search error:", err);
+      }
+    }
+
+    // --- Feature #28: Anime Quote Detection ---
+    let quoteEmbedData = null;
+    const quoteKeywords = ['anime quote', 'random quote', 'give me a quote', 'anime quotes', 'quote of the day', 'random anime quote'];
+    const isAskingQuote = quoteKeywords.some(k => lowerQuery.includes(k));
+    if (isAskingQuote) {
+      try {
+        quoteEmbedData = await getAnimeQuote();
+        if (quoteEmbedData) {
+          systemPromptContent += `\n\n[ANIME QUOTE — Present this quote naturally in a beautifully formatted way. Use a quote block. A rich embed will also be attached. Do NOT make up your own quote, use this exact one.]\nQuote: "${quoteEmbedData.quote}"\nCharacter: ${quoteEmbedData.character}\nAnime: ${quoteEmbedData.anime}`;
+        }
+      } catch (err) {
+        console.error("Anime quote error:", err);
+      }
+    }
+
+    // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
+    let anilistEmbedData = null;
+    if (!isAskingSchedule && !characterSearchName && !isAskingQuote) {
+      let animeDetection = detectAnimeQuery(originalCleanQuery);
+      
+      // Fallback: If no title detected in user's query, but it is a reply to a non-bot message, check the referenced message
+      if (!animeDetection && referencedMessage && referencedMessage.author.id !== client.user.id) {
+        const refCleaned = referencedMessage.content
+          .replace(botMention, '')
+          .replace(botNicknameMention, '')
+          .trim();
+        animeDetection = detectAnimeQuery(refCleaned);
+      }
+
+      if (animeDetection) {
+        try {
+          const anilistResult = await searchAniList(animeDetection.title, animeDetection.mediaType);
+          if (anilistResult) {
+            systemPromptContent += `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer accurately. Weave it naturally into your response in your own Tessia personality. Do NOT copy-paste it raw. Do NOT mention "AniList" or any data source name. Present the info as if you personally know it. If the user asked for "full form" or abbreviation meaning, the title below IS the answer.]\n${anilistResult.contextText}`;
+            anilistEmbedData = anilistResult.embedData;
+          }
+        } catch (err) {
+          console.error("AniList search error:", err);
+        }
       }
     }
 
@@ -678,11 +752,13 @@ Think step-by-step about what they're really asking. Consider their preferences.
     // Add a 2-second delay to make it feel natural
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Send response — with rich embed if AniList data is available
+    // Send response — with rich embed if AniList/Character/Quote data is available
     const replyOptions = {};
-    if (anilistEmbedData) {
-      replyOptions.embeds = [buildAniListEmbed(anilistEmbedData)];
-    }
+    const embeds = [];
+    if (anilistEmbedData) embeds.push(buildAniListEmbed(anilistEmbedData));
+    if (characterEmbedData) embeds.push(buildCharacterEmbed(characterEmbedData));
+    if (quoteEmbedData) embeds.push(buildQuoteEmbed(quoteEmbedData));
+    if (embeds.length > 0) replyOptions.embeds = embeds;
 
     if (botResponse.length <= 2000) {
       replyOptions.content = botResponse;
@@ -1133,8 +1209,12 @@ async function searchAniList(searchTerm, mediaType = null) {
 function detectAnimeQuery(query) {
   const lq = query.toLowerCase().trim();
   
-  // Basic conversational fillers to ignore if they are the only content
-  const fillers = new Set(['hello', 'hi', 'hey', 'yo', 'thanks', 'thank you', 'ok', 'okay', 'yes', 'no', 'yeah', 'cool', 'good', 'nice', 'bye', 'reset', 'ping', 'help', 'profile', 'about me']);
+  // Basic conversational fillers and non-anime queries to ignore
+  const fillers = new Set(['hello', 'hi', 'hey', 'yo', 'thanks', 'thank you', 'ok', 'okay', 'yes', 'no', 'yeah', 'cool', 'good', 'nice', 'bye', 'reset', 'ping', 'help', 'profile', 'about me', 'this', 'that', 'it', 'them', 'us', 'me', 'you', 'her', 'him', 'nothing', 'everything', 'something', 'anything', 'lol', 'lmao', 'haha', 'hehe', 'bruh', 'bro']);
+  
+  // Skip if query matches schedule/character/quote patterns
+  const skipPatterns = ['airing today', 'airing this week', 'anime schedule', 'anime today', 'what anime is airing', 'picture of', 'show me', 'image of', 'pic of', 'photo of', 'anime quote', 'random quote', 'give me a quote', 'blurred anime', 'how to get mod', 'how to become mod', 'who made you', 'who made u', 'who are you', 'who r u', 'emillia', 'emilia', 'what is airing', 'episodes today', 'new episodes'];
+  if (skipPatterns.some(p => lq.includes(p))) return null;
   
   // Media type words to strip and detect type
   const mediaTypeWords = ['anime', 'manga', 'manhwa', 'manhua', 'webtoon', 'light novel', 'ln', 'series', 'show', 'book'];
@@ -1331,4 +1411,185 @@ async function getSmartRecommendations(userMemories) {
   return null;
 }
 
+// --- Feature #26: AniList Airing Schedule ---
+async function getAiringSchedule() {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const endOfDay = now + 86400; // 24 hours from now
+
+    const query = `
+    query ($airingAt_greater: Int, $airingAt_lesser: Int) {
+      Page(perPage: 25) {
+        airingSchedules(airingAt_greater: $airingAt_greater, airingAt_lesser: $airingAt_lesser, sort: TIME) {
+          airingAt
+          episode
+          media {
+            title { romaji english }
+            format
+            isAdult
+            siteUrl
+            coverImage { medium }
+          }
+        }
+      }
+    }`;
+
+    const response = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        query,
+        variables: { airingAt_greater: now, airingAt_lesser: endOfDay }
+      })
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const schedules = data?.data?.Page?.airingSchedules || [];
+
+    return schedules
+      .filter(s => s.media && !s.media.isAdult)
+      .map(s => ({
+        title: s.media.title.english || s.media.title.romaji,
+        episode: s.episode,
+        airingTime: new Date(s.airingAt * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }),
+        format: s.media.format,
+        url: s.media.siteUrl,
+        coverImage: s.media.coverImage?.medium
+      }));
+  } catch (err) {
+    console.error('Airing schedule error:', err.message);
+    return null;
+  }
+}
+
+// --- Feature #27: AniList Character Search ---
+async function searchAniListCharacter(name) {
+  try {
+    const query = `
+    query ($search: String) {
+      Character(search: $search) {
+        id
+        name { full native alternative }
+        image { large medium }
+        description(asHtml: false)
+        siteUrl
+        media(perPage: 3, sort: POPULARITY_DESC) {
+          nodes {
+            title { romaji english }
+            format
+            siteUrl
+          }
+        }
+      }
+    }`;
+
+    const response = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query, variables: { search: name } })
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const char = data?.data?.Character;
+    if (!char) return null;
+
+    let cleanDesc = char.description || 'No description available.';
+    // Remove spoiler tags and HTML
+    cleanDesc = cleanDesc.replace(/~!.*?!~/gs, '[spoiler hidden]').replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').substring(0, 400);
+
+    const mediaList = char.media?.nodes || [];
+    const mediaTitle = mediaList.length > 0
+      ? (mediaList[0].title.english || mediaList[0].title.romaji)
+      : 'Unknown';
+
+    return {
+      name: char.name.full,
+      nativeName: char.name.native,
+      altNames: char.name.alternative || [],
+      description: cleanDesc,
+      imageUrl: char.image?.large || char.image?.medium,
+      url: char.siteUrl,
+      mediaTitle,
+      mediaList: mediaList.map(m => ({
+        title: m.title.english || m.title.romaji,
+        format: m.format,
+        url: m.siteUrl
+      }))
+    };
+  } catch (err) {
+    console.error('Character search error:', err.message);
+    return null;
+  }
+}
+
+// --- Feature #27: Build Character Embed ---
+function buildCharacterEmbed(data) {
+  const embed = new EmbedBuilder()
+    .setColor(0xE91E63)
+    .setTitle(data.name)
+    .setURL(data.url)
+    .setDescription(data.description.substring(0, 256));
+
+  if (data.imageUrl) embed.setImage(data.imageUrl);
+
+  if (data.nativeName) {
+    embed.addFields({ name: 'Native Name', value: data.nativeName, inline: true });
+  }
+
+  embed.addFields({ name: 'Appears In', value: data.mediaTitle, inline: true });
+
+  if (data.mediaList.length > 1) {
+    const otherMedia = data.mediaList.slice(1).map(m => `[${m.title}](${m.url})`).join(', ');
+    embed.addFields({ name: 'Also In', value: otherMedia, inline: false });
+  }
+
+  embed.setFooter({ text: 'Character data from AniList' });
+
+  return embed;
+}
+
+// --- Feature #28: Anime Quote API ---
+async function getAnimeQuote() {
+  try {
+    const response = await fetch('https://animechan.io/api/v1/quotes/random', {
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const q = data?.data;
+    if (!q) return null;
+
+    return {
+      quote: q.content || q.quote || '',
+      character: q.character?.name || q.character || 'Unknown',
+      anime: q.anime?.name || q.anime || 'Unknown'
+    };
+  } catch (err) {
+    console.error('Anime quote error:', err.message);
+    return null;
+  }
+}
+
+// --- Feature #28: Build Quote Embed ---
+function buildQuoteEmbed(data) {
+  const embed = new EmbedBuilder()
+    .setColor(0x9B59B6)
+    .setTitle('✨ Anime Quote')
+    .setDescription(`> *"${data.quote}"*`)
+    .addFields(
+      { name: 'Character', value: data.character, inline: true },
+      { name: 'Anime', value: data.anime, inline: true }
+    )
+    .setFooter({ text: 'Powered by AnimeChan' });
+
+  return embed;
+}
+
 client.login(process.env.DISCORD_TOKEN);
+
