@@ -60,6 +60,9 @@ const COOLDOWN_MS = 3000; // 3-second cooldown between messages
 // --- NEW FEATURE: Anti-Repetition Tracker (#6) ---
 const lastResponseOpeners = new Map(); // Map username -> Array of last 3 response openers
 
+// --- NEW FEATURE: Character Guessing Game (#29) ---
+const activeGames = new Map(); // Map username -> { character, hints, guessCount, mediaTitle }
+
 // --- NEW FEATURE: NSFW/Inappropriate Content Filter (#7) ---
 const nsfwKeywords = [
   "nsfw", "hentai", "porn", "sex", "nude", "naked", "boob", "dick", "pussy", 
@@ -266,14 +269,34 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // Check for a help command
-    if (originalCleanQuery.toLowerCase() === 'help') {
-      const helpMessage = `🌸 **Tessia Anime Assistant Guide** 🌸
-Here are the commands you can use with me:
-• **\`@Tessia profile\`** - Shows all the facts I permanently remember about you.
-• **\`@Tessia reset\`** - Clears our chat history and my database memory of you. *(Note: My speaking tone is permanent and cannot be changed!)*
-• **\`@Tessia ping\`** - Checks my response speed!
-• Or just chat with me normally! Ask me for anime recommendations, character discussions, or anything else! Emojis and anime vibes included! 💖✨`;
+    // Check for a help / features command
+    if (originalCleanQuery.toLowerCase() === 'help' || lowerQuery.includes('your features') || lowerQuery.includes('what can you do') || lowerQuery.includes('ur features') || lowerQuery.includes('what do you do')) {
+      const helpMessage = `🌸 **Tessia — Your Anipedia Companion** 🌸
+Here's everything I can do!
+
+💬 **Chat & Commands**
+• **\`@Tessia\`** — Just mention me to start chatting! I remember our conversations 🧠
+• **\`@Tessia help\`** — Shows this guide
+• **\`@Tessia profile\`** — Shows all the facts I permanently remember about you
+• **\`@Tessia reset\`** — Clears our chat history and my memory of you
+• **\`@Tessia ping\`** — Checks my response speed!
+
+🎬 **Anime & Manga Info**
+• Ask me about any anime, manga, or manhwa — I'll give you verified data with rich embeds! 📚
+• **\`@Tessia what anime is airing today\`** — Real-time airing schedule 📅
+• **\`@Tessia recommend me an anime\`** — Personalized picks based on your tastes ✨
+
+🖼️ **Character Lookup**
+• **\`@Tessia show me picture of Eren\`** — Character images, info & appearances 🎨
+
+🎮 **Games & Fun**
+• **\`@Tessia character guessing game\`** — I'll pick a character, you guess who it is! 🔍
+• **\`@Tessia give me an anime quote\`** — Random anime quotes with beautiful embeds ✨
+
+🌟 **Server Info**
+• Ask me about **Anipedia** or its features
+• Ask me how to become a **Moderator**
+• Ask about my sister **Emillia** 💕`;
       await message.reply(helpMessage);
       return;
     }
@@ -521,6 +544,93 @@ Here's what we've got for you! 🌸
     const isAskingEmillia = emilliaKeywords.some(k => lowerQuery.includes(k));
     if (isAskingEmillia) {
       systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about Emillia. Explain that you (Tessia) are Emillia's big sister. Mention that Tessia is for chatting and community features, while Emillia is for moderation and administrative duties. Keep it warm, polite, and under 3-4 lines.]`;
+    }
+
+    // --- Feature #29: Character Guessing Game ---
+    const gameKeywords = ['character guessing game', 'guess the character', 'anime guessing game', 'character game', 'guessing game', 'play a game'];
+    const isStartingGame = gameKeywords.some(k => lowerQuery.includes(k));
+    const existingGame = activeGames.get(username);
+    
+    // Handle active game interactions
+    if (existingGame) {
+      const lg = lowerQuery.trim();
+      
+      // Give up
+      if (lg === 'give up' || lg === 'i give up' || lg === 'surrender') {
+        activeGames.delete(username);
+        await message.reply(`The answer was **${existingGame.character}** from **${existingGame.mediaTitle}**! 🌸 Better luck next time — want to play again? Just say \`character guessing game\`! ✨`);
+        return;
+      }
+      
+      // Ask for hint
+      if (lg === 'hint' || lg === 'give me a hint' || lg === 'another hint' || lg === 'more hints') {
+        const nextHint = existingGame.hints[existingGame.hintIndex];
+        if (nextHint && existingGame.hintIndex < existingGame.hints.length) {
+          existingGame.hintIndex++;
+          await message.reply(`💡 **Hint ${existingGame.hintIndex}/${existingGame.hints.length}**: ${nextHint}`);
+        } else {
+          await message.reply(`I've given you all my hints! 😅 Try guessing or say \`give up\` to reveal the answer! 🌸`);
+        }
+        return;
+      }
+      
+      // Check guess
+      const charNameLower = existingGame.character.toLowerCase();
+      const guessLower = lg.replace(/[?!.]+$/, '').trim();
+      
+      // Check if guess matches character name (full or partial first/last name)
+      const nameParts = charNameLower.split(/\s+/);
+      const isCorrect = guessLower === charNameLower || nameParts.some(part => part.length >= 3 && guessLower === part);
+      
+      if (isCorrect) {
+        activeGames.delete(username);
+        await message.reply(`🎉 **CORRECT!** It was **${existingGame.character}** from **${existingGame.mediaTitle}**! Amazing guess! ✨ Want to play again? Just say \`character guessing game\`! 🌸`);
+        return;
+      } else {
+        existingGame.guessCount++;
+        // Auto-reveal after 5 wrong guesses
+        if (existingGame.guessCount >= 5) {
+          activeGames.delete(username);
+          await message.reply(`❌ Not quite! After 5 tries, the answer was **${existingGame.character}** from **${existingGame.mediaTitle}**! 🌸 Want to try another round? Just say \`character guessing game\`! ✨`);
+          return;
+        }
+        // Give next hint automatically if available
+        let hintMsg = `❌ That's not it! `;
+        if (existingGame.hintIndex < existingGame.hints.length) {
+          const nextHint = existingGame.hints[existingGame.hintIndex];
+          existingGame.hintIndex++;
+          hintMsg += `Here's another hint — **Hint ${existingGame.hintIndex}/${existingGame.hints.length}**: ${nextHint}`;
+        } else {
+          hintMsg += `I've given all my hints! Keep trying or say \`give up\` 🌸`;
+        }
+        await message.reply(hintMsg);
+        return;
+      }
+    }
+    
+    // Start new game
+    if (isStartingGame || lowerQuery === 'start') {
+      try {
+        const gameChar = await getRandomCharacterForGame();
+        if (gameChar) {
+          activeGames.set(username, {
+            character: gameChar.name,
+            mediaTitle: gameChar.mediaTitle,
+            hints: gameChar.hints,
+            hintIndex: 1, // First hint given immediately
+            guessCount: 0
+          });
+          await message.reply(`🎮 **Character Guessing Game!** 🎮\n\nI'm thinking of an anime/manga character! Try to guess who it is 🔍\n\n💡 **Hint 1/${gameChar.hints.length}**: ${gameChar.hints[0]}\n\nType your guess, say \`hint\` for more clues, or \`give up\` to reveal! ✨`);
+          return;
+        } else {
+          await message.reply(`I couldn't pick a character right now 😢 Try again in a moment! 🌸`);
+          return;
+        }
+      } catch (err) {
+        console.error('Game start error:', err);
+        await message.reply(`Something went wrong starting the game! Try again 🌸`);
+        return;
+      }
     }
 
     // --- Feature #26: Airing Schedule Detection ---
@@ -1213,7 +1323,7 @@ function detectAnimeQuery(query) {
   const fillers = new Set(['hello', 'hi', 'hey', 'yo', 'thanks', 'thank you', 'ok', 'okay', 'yes', 'no', 'yeah', 'cool', 'good', 'nice', 'bye', 'reset', 'ping', 'help', 'profile', 'about me', 'this', 'that', 'it', 'them', 'us', 'me', 'you', 'her', 'him', 'nothing', 'everything', 'something', 'anything', 'lol', 'lmao', 'haha', 'hehe', 'bruh', 'bro']);
   
   // Skip if query matches schedule/character/quote patterns
-  const skipPatterns = ['airing today', 'airing this week', 'anime schedule', 'anime today', 'what anime is airing', 'picture of', 'show me', 'image of', 'pic of', 'photo of', 'anime quote', 'random quote', 'give me a quote', 'blurred anime', 'how to get mod', 'how to become mod', 'who made you', 'who made u', 'who are you', 'who r u', 'emillia', 'emilia', 'what is airing', 'episodes today', 'new episodes'];
+  const skipPatterns = ['airing today', 'airing this week', 'anime schedule', 'anime today', 'what anime is airing', 'picture of', 'show me', 'image of', 'pic of', 'photo of', 'anime quote', 'random quote', 'give me a quote', 'blurred anime', 'how to get mod', 'how to become mod', 'who made you', 'who made u', 'who are you', 'who r u', 'emillia', 'emilia', 'what is airing', 'episodes today', 'new episodes', 'character guessing game', 'guessing game', 'guess the character', 'play a game', 'give up', 'i give up', 'hint', 'give me a hint', 'another hint', 'start'];
   if (skipPatterns.some(p => lq.includes(p))) return null;
   
   // Media type words to strip and detect type
@@ -1591,5 +1701,103 @@ function buildQuoteEmbed(data) {
   return embed;
 }
 
-client.login(process.env.DISCORD_TOKEN);
+// --- Feature #29: Get Random Character for Guessing Game ---
+async function getRandomCharacterForGame() {
+  try {
+    // Pick a random page from popular characters
+    const randomPage = Math.floor(Math.random() * 20) + 1;
+    
+    const query = `
+    query ($page: Int) {
+      Page(page: $page, perPage: 10) {
+        characters(sort: FAVOURITES_DESC) {
+          id
+          name { full native }
+          description(asHtml: false)
+          gender
+          image { large }
+          media(perPage: 1, sort: POPULARITY_DESC) {
+            nodes {
+              title { romaji english }
+              genres
+              format
+              seasonYear
+            }
+          }
+        }
+      }
+    }`;
 
+    const response = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query, variables: { page: randomPage } })
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const characters = data?.data?.Page?.characters || [];
+    
+    if (characters.length === 0) return null;
+
+    // Pick a random character from the page
+    const char = characters[Math.floor(Math.random() * characters.length)];
+    const media = char.media?.nodes?.[0];
+    if (!media) return null;
+
+    const mediaTitle = media.title.english || media.title.romaji;
+    const genres = media.genres || [];
+    
+    // Clean description for hint generation
+    let cleanDesc = char.description || '';
+    cleanDesc = cleanDesc.replace(/~!.*?!~/gs, '').replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+
+    // Build progressive hints (easy to hard)
+    const hints = [];
+    
+    // Hint 1: Genre + Format
+    hints.push(`This character is from a **${genres.slice(0, 2).join('/')}** ${media.format === 'TV' ? 'anime' : (media.format || 'series')}${media.seasonYear ? ` (${media.seasonYear})` : ''}.`);
+    
+    // Hint 2: Gender
+    if (char.gender) {
+      hints.push(`The character is **${char.gender.toLowerCase()}**.`);
+    } else {
+      hints.push(`The anime/manga they appear in is titled **"${mediaTitle}"**.`);
+    }
+    
+    // Hint 3: Series title
+    if (char.gender) {
+      hints.push(`They appear in **"${mediaTitle}"**.`);
+    } else {
+      // Give a description snippet instead
+      if (cleanDesc.length > 20) {
+        hints.push(`About them: "${cleanDesc.substring(0, 100)}..."`);
+      } else {
+        hints.push(`Their series has genres: **${genres.join(', ')}**.`);
+      }
+    }
+    
+    // Hint 4: Name initial
+    const fullName = char.name.full;
+    hints.push(`Their name starts with the letter **"${fullName.charAt(0)}"** and has **${fullName.length}** characters (including spaces).`);
+    
+    // Hint 5: Very specific hint
+    if (char.name.native) {
+      hints.push(`In Japanese, their name is written as **${char.name.native}**.`);
+    } else {
+      hints.push(`Their full name is **${fullName.length}** characters long and starts with **"${fullName.substring(0, 2)}"**.`);
+    }
+
+    return {
+      name: fullName,
+      mediaTitle,
+      hints
+    };
+  } catch (err) {
+    console.error('Random character fetch error:', err.message);
+    return null;
+  }
+}
+
+client.login(process.env.DISCORD_TOKEN);
