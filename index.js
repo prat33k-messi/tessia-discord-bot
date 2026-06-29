@@ -104,9 +104,10 @@ client.on('messageCreate', async (message) => {
 
   // Check if message is a reply to the bot
   let isReplyToBot = false;
+  let referencedMessage = null;
   if (message.reference && message.reference.messageId) {
     try {
-      const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
+      referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
       if (referencedMessage.author.id === client.user.id) {
         isReplyToBot = true;
       }
@@ -128,10 +129,21 @@ client.on('messageCreate', async (message) => {
     const channelName = message.channel.name || "DM";
 
     // Clean user query by removing the mention string
-    let cleanQuery = message.content
+    let originalCleanQuery = message.content
       .replace(botMention, '')
       .replace(botNicknameMention, '')
       .trim();
+
+    let cleanQuery = originalCleanQuery;
+
+    // Handle empty mentions that are replies
+    if (!cleanQuery && referencedMessage) {
+      const refCleaned = referencedMessage.content
+        .replace(botMention, '')
+        .replace(botNicknameMention, '')
+        .trim();
+      cleanQuery = refCleaned;
+    }
 
     if (!cleanQuery) {
       if (username === '_c0rle0ne') {
@@ -223,7 +235,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // Check for a reset command
-    if (cleanQuery.toLowerCase() === 'reset') {
+    if (originalCleanQuery.toLowerCase() === 'reset') {
       memory.set(username, []); // Per-user memory (#3)
       preloadedMemories.delete(username); // Clear preloaded cache (#12)
       if (db) {
@@ -242,7 +254,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // Check for a help command
-    if (cleanQuery.toLowerCase() === 'help') {
+    if (originalCleanQuery.toLowerCase() === 'help') {
       const helpMessage = `🌸 **Tessia Anime Assistant Guide** 🌸
 Here are the commands you can use with me:
 • **\`@Tessia profile\`** - Shows all the facts I permanently remember about you.
@@ -254,14 +266,14 @@ Here are the commands you can use with me:
     }
 
     // Check for ping command
-    if (cleanQuery.toLowerCase() === 'ping') {
+    if (originalCleanQuery.toLowerCase() === 'ping') {
       const latency = Date.now() - message.createdTimestamp;
       await message.reply(`🏓 Pong! Latency is **${latency}ms**. I'm running at full power! ⚡🌸`);
       return;
     }
 
     // Check for profile command
-    if (cleanQuery.toLowerCase() === 'profile' || cleanQuery.toLowerCase() === 'about me') {
+    if (originalCleanQuery.toLowerCase() === 'profile' || originalCleanQuery.toLowerCase() === 'about me') {
       if (userMemories.length === 0) {
         const notFoundText = username === '_c0rle0ne' 
           ? `I don't have any permanent facts stored about you yet, Aerion-sama! Chat with me normally and I will start remembering! 🌸`
@@ -292,9 +304,12 @@ Here are the commands you can use with me:
     }
 
     // --- Feature #5: Smart Response Length ---
-    const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me'];
-    const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k));
-    const maxTokens = isDetailedQuestion ? 2048 : 512;
+    const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me', 'full details', 'detailed info', 'detailed', 'in-depth', 'comprehensive', 'synopsis'];
+    const briefKeywords = ['less details', 'less detail', 'brief', 'short', 'summarize', 'summary', 'quick'];
+    
+    const isBriefQuestion = briefKeywords.some(k => lowerQuery.includes(k));
+    const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k)) && !isBriefQuestion;
+    const maxTokens = isDetailedQuestion ? 2048 : (isBriefQuestion ? 256 : 512);
 
     // --- Feature #6: Anti-Repetition ---
     let antiRepetitionHint = '';
@@ -372,11 +387,17 @@ Formatting & Style:
 - For normal/casual conversation, keep responses to 1-2 lines with emojis.
 - For informational responses, keep to a maximum of 3-4 lines with relevant emojis.
 ${isDetailedQuestion ? '- This is a detailed question, so you may extend up to 6-8 lines if needed.' : ''}
-- Use multiple emojis (usually 3 to 4) naturally throughout your responses, matching the conversation's mood.
+- Use emojis naturally throughout your responses matching the conversation's mood, but NEVER use more than 2 emojis in any single sentence.
 - When mentioning Discord channels, do NOT wrap them in "<>" (e.g. do NOT output "<#general-chat>"). Always output them simply starting with '#' (e.g. "#・general-chat", "#・media-share", "#・owo", "#・art", "#・manga-pannels").
 - Make use of beautiful Discord formatting (bolding, bullet points, quote blocks) to structure your text nicely.
 - You are an expert in all things Anime, Manga, Light Novels, and Gaming.
-- If he asks you to clear memory, tell him he can type '@Tessia reset'.`;
+- If he asks you to clear memory, tell him he can type '@Tessia reset'.
+
+Conversational Dynamics & Flow:
+- VARIETY: Never repeat the same sentence structure, catchphrase, or specific greeting in consecutive replies. Vary your vocabulary naturally.
+- FLOW: Treat the conversation like a continuous story. Every reply must build on the user's last message, not just repeat old information or rephrase your previous turn.
+- LOGIC & CONTEXT: Prioritize logical continuity. If a user asks a follow-up question, answer the new nuance immediately instead of restating the baseline facts.
+- DETAIL LEVEL: Adjust your response detail based on the user's request. If they ask for "full details" or "detailed info", provide a comprehensive summary of up to 6-8 lines. If they ask for "less details", "brief summary", or "short", provide a concise 1-2 sentence overview (max 3 lines). Otherwise, keep normal informational responses to 3-4 lines max.`;
     } else {
       systemPromptContent = `You are Tessia Eralith, the elven princess of Elenoir from The Beginning After the End (TBATE), the official resident AI bot for the Anipedia Discord server.
 You speak in a natural, highly humanized, and expressive anime tone. You are NOT an AI bot, robotic assistant, or virtual utility, so you must NEVER use generic chatbot phrases, machine-like helper openings (e.g., "How can I help you?", "As an AI, I...", "Here is the information you requested"), or rigid, formal structures. Speak like a real, emotional, and spirited elven girl talking to a friend or server member.
@@ -410,11 +431,17 @@ Formatting & Style:
 - For normal/casual conversation, keep responses to 1-2 lines with emojis.
 - For informational responses, keep to a maximum of 3-4 lines with relevant emojis.
 ${isDetailedQuestion ? '- This is a detailed question, so you may extend up to 6-8 lines if needed.' : ''}
-- Use multiple emojis (usually 3 to 4) naturally throughout your responses, matching the conversation's mood.
+- Use emojis naturally throughout your responses matching the conversation's mood, but NEVER use more than 2 emojis in any single sentence.
 - When mentioning Discord channels, do NOT wrap them in "<>" (e.g. do NOT output "<#general-chat>"). Always output them simply starting with '#' (e.g. "#・general-chat", "#・media-share", "#・owo", "#・art", "#・manga-pannels").
 - Make use of beautiful Discord formatting (bolding, bullet points, quote blocks) to structure your text nicely.
 - You are an expert in all things Anime, Manga, Light Novels, and Gaming.
-- If they ask you to clear memory, tell them they can type '@Tessia reset'.`;
+- If they ask you to clear memory, tell them they can type '@Tessia reset'.
+
+Conversational Dynamics & Flow:
+- VARIETY: Never repeat the same sentence structure, catchphrase, or specific greeting in consecutive replies. Vary your vocabulary naturally.
+- FLOW: Treat the conversation like a continuous story. Every reply must build on the user's last message, not just repeat old information or rephrase your previous turn.
+- LOGIC & CONTEXT: Prioritize logical continuity. If a user asks a follow-up question, answer the new nuance immediately instead of restating the baseline facts.
+- DETAIL LEVEL: Adjust your response detail based on the user's request. If they ask for "full details" or "detailed info", provide a comprehensive summary of up to 6-8 lines. If they ask for "less details", "brief summary", or "short", provide a concise 1-2 sentence overview (max 3 lines). Otherwise, keep normal informational responses to 3-4 lines max.`;
     }
 
     if (userMemories.length > 0) {
@@ -485,7 +512,17 @@ Here's what we've got for you! 🌸
 
     // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
     let anilistEmbedData = null;
-    const animeDetection = detectAnimeQuery(cleanQuery);
+    let animeDetection = detectAnimeQuery(originalCleanQuery);
+    
+    // Fallback: If no title detected in user's query, but it is a reply, check the referenced message
+    if (!animeDetection && referencedMessage) {
+      const refCleaned = referencedMessage.content
+        .replace(botMention, '')
+        .replace(botNicknameMention, '')
+        .trim();
+      animeDetection = detectAnimeQuery(refCleaned);
+    }
+
     if (animeDetection) {
       try {
         const anilistResult = await searchAniList(animeDetection.title, animeDetection.mediaType);
@@ -1096,49 +1133,69 @@ async function searchAniList(searchTerm, mediaType = null) {
 function detectAnimeQuery(query) {
   const lq = query.toLowerCase().trim();
   
-  // Patterns that indicate the user is asking about an anime/manga/manhwa title
-  const askPatterns = [
-    /(?:tell\s+(?:me\s+)?about|what\s+is|what's|whats|who\s+is|describe|review|explain|info\s+(?:on|about)|information\s+(?:on|about)|details\s+(?:on|about)|synopsis\s+(?:of|for)|summary\s+(?:of|for)|plot\s+(?:of|for)|rating\s+(?:of|for)|score\s+(?:of|for)|episodes?\s+(?:of|in)|chapters?\s+(?:of|in)|recommend(?:ation)?|is\s+.+\s+good|is\s+.+\s+worth|should\s+i\s+(?:watch|read)|have\s+you\s+(?:watched|read|seen)|do\s+you\s+know|thoughts?\s+on|opinion\s+on|how\s+(?:is|was)|full\s+form\s+(?:of)?)\s+(.+)/i,
-  ];
+  // Basic conversational fillers to ignore if they are the only content
+  const fillers = new Set(['hello', 'hi', 'hey', 'yo', 'thanks', 'thank you', 'ok', 'okay', 'yes', 'no', 'yeah', 'cool', 'good', 'nice', 'bye', 'reset', 'ping', 'help', 'profile', 'about me']);
   
-  // Direct alias check first (e.g., just "orv" or "orv manhwa")
-  const mediaTypeWords = ['anime', 'manga', 'manhwa', 'manhua', 'webtoon', 'light novel', 'ln', 'series'];
+  // Media type words to strip and detect type
+  const mediaTypeWords = ['anime', 'manga', 'manhwa', 'manhua', 'webtoon', 'light novel', 'ln', 'series', 'show', 'book'];
   let cleanedQuery = lq;
   let detectedType = null;
   
   for (const mtw of mediaTypeWords) {
     if (cleanedQuery.includes(mtw)) {
       cleanedQuery = cleanedQuery.replace(new RegExp(`\\b${mtw}\\b`, 'gi'), '').trim();
-      if (mtw === 'anime') detectedType = 'ANIME';
-      else detectedType = 'MANGA'; // manga, manhwa, manhua, webtoon, LN all fall under MANGA type in AniList
+      if (mtw === 'anime' || mtw === 'show') detectedType = 'ANIME';
+      else detectedType = 'MANGA';
     }
   }
   
-  // Check if the cleaned query is a known alias
+  // Remove punctuation at start/end
+  cleanedQuery = cleanedQuery.replace(/^[?\s,.:;!#()"-]+|[?\s,.:;!#()"-]+$/g, '').trim();
+  
+  if (fillers.has(cleanedQuery)) {
+    return null;
+  }
+  
+  // If the query is a known alias, return it immediately
   if (ANIME_ALIASES[cleanedQuery]) {
     return { title: cleanedQuery, mediaType: detectedType };
   }
   
-  // Check the ask patterns
-  for (const pattern of askPatterns) {
-    const match = lq.match(pattern);
-    if (match && match[1]) {
-      let title = match[1].trim();
-      // Remove trailing question marks and common filler words
-      title = title.replace(/[?!.]+$/, '').replace(/\b(anime|manga|manhwa|manhua|webtoon|series|light novel|ln)\b/gi, '').trim();
-      if (title.length >= 2) {
+  // Trigger keywords that indicate user wants info about a title
+  const triggers = [
+    'tell me about', 'what is', 'what\'s', 'whats', 'who is', 'describe', 'review', 'explain',
+    'info on', 'info about', 'information on', 'information about', 'details on', 'details about',
+    'synopsis of', 'synopsis for', 'summary of', 'summary for', 'plot of', 'plot for', 'rating of',
+    'score of', 'episodes of', 'chapters of', 'recommendation for', 'recommend', 'thoughts on',
+    'opinion on', 'how is', 'how was', 'full form of', 'full form'
+  ];
+  
+  // Check if any trigger word exists in the query
+  for (const trigger of triggers) {
+    if (lq.includes(trigger)) {
+      let title = lq.replace(trigger, '').trim();
+      for (const mtw of mediaTypeWords) {
+        title = title.replace(new RegExp(`\\b${mtw}\\b`, 'gi'), '').trim();
+      }
+      title = title.replace(/^[?\s,.:;!#()"-]+|[?\s,.:;!#()"-]+$/g, '').trim();
+      if (title.length >= 2 && !fillers.has(title)) {
         return { title, mediaType: detectedType };
       }
     }
   }
   
-  // Check if any known alias appears in the message (for short messages)
-  if (lq.split(/\s+/).length <= 6) {
-    for (const alias of Object.keys(ANIME_ALIASES)) {
-      if (lq.includes(alias) && alias.length >= 2) {
-        return { title: alias, mediaType: detectedType };
-      }
+  // Check if any known alias appears in the message
+  for (const alias of Object.keys(ANIME_ALIASES)) {
+    if (lq.includes(alias) && alias.length >= 2) {
+      return { title: alias, mediaType: detectedType };
     }
+  }
+
+  // If no triggers and not a filler, but the cleaned query is short (1 to 8 words),
+  // let's treat the entire cleaned query as the search term!
+  const words = cleanedQuery.split(/\s+/);
+  if (words.length >= 1 && words.length <= 8) {
+    return { title: cleanedQuery, mediaType: detectedType };
   }
   
   return null;
