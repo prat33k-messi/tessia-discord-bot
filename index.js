@@ -1,5 +1,7 @@
 const express = require('express');
+console.log('Running on Node.js version:', process.version);
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+
 const { Groq } = require('groq-sdk');
 require('dotenv').config();
 
