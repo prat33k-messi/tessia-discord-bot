@@ -49,6 +49,17 @@ const client = new Client({
   ],
 });
 
+// Diagnostic listeners to debug connection issues on Render
+client.on('error', (err) => console.error('Discord client error:', err));
+client.on('warn', (warning) => console.warn('Discord client warning:', warning));
+client.on('shardError', (err) => console.error('Shard error occurred:', err));
+client.on('debug', (info) => {
+  if (info.includes('Gateway') || info.includes('Session') || info.includes('connect') || info.includes('identif') || info.includes('rate') || info.includes('Close') || info.includes('heartbeat')) {
+    console.log('Discord debug:', info);
+  }
+});
+
+
 // Conversation memory cache: Map username -> Array of message objects (per-user, not per-channel)
 const memory = new Map();
 const MAX_MEMORY_LIMIT = 20; // Number of messages to remember for context (expanded for better continuity)
