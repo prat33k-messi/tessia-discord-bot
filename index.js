@@ -63,6 +63,72 @@ const lastResponseOpeners = new Map(); // Map username -> Array of last 3 respon
 // --- NEW FEATURE: Character Guessing Game (#29) ---
 const activeGames = new Map(); // Map username -> { character, hints, guessCount, mediaTitle }
 
+// --- NEW FEATURE: Blind Anime Ranking Game (#30) ---
+const activeRankingGames = new Map(); // Map username -> { anime[], bracket[], round, match, winner }
+
+// --- Feature #31: Groq Tool Calling Definitions ---
+const TESSIA_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "search_anime_manga",
+      description: "Search for detailed information about a specific anime, manga, manhwa, webtoon, or light novel. Call this when the user asks about a specific title, wants ratings, episode count, synopsis, genres, studio, or recommendations for a specific series. Also call when the user uses abbreviations like AOT, JJK, TBATE, etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The title or abbreviation of the anime/manga to search for (e.g. 'Attack on Titan', 'JJK', 'Solo Leveling')" },
+          media_type: { type: "string", enum: ["ANIME", "MANGA"], description: "Optional. ANIME for anime/donghua, MANGA for manga/manhwa/webtoon/light novel." }
+        },
+        required: ["title"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_airing_schedule",
+      description: "Get the real-time anime airing schedule for today. Call when the user asks what anime is airing today, what new episodes are coming out, the anime schedule, or anything about today's releases.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_character",
+      description: "Search for an anime/manga character to get their image, description, and media appearances. Call when the user asks to see a character, wants a picture/image of a character, asks 'who is [character]', or asks what a character looks like.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The character name to search for" }
+        },
+        required: ["name"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_anime_quote",
+      description: "Get a random anime quote. Call when the user asks for an anime quote, a random quote, or quote of the day.",
+      parameters: { type: "object", properties: {}, required: [] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "Search the web for current, real-time, or factual information. Call when the user asks about current events, real-world facts, release dates, news, or anything that requires up-to-date information that you don't know.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query" }
+        },
+        required: ["query"]
+      }
+    }
+  }
+];
+
 // --- NEW FEATURE: NSFW/Inappropriate Content Filter (#7) ---
 const nsfwKeywords = [
   "nsfw", "hentai", "porn", "sex", "nude", "naked", "boob", "dick", "pussy", 
@@ -291,6 +357,7 @@ Here's everything I can do!
 
 🎮 **Games & Fun**
 • **\`@Tessia character guessing game\`** — I'll pick a character, you guess who it is! 🔍
+• **\`@Tessia anime ranking game\`** — 8 mystery anime in a blind tournament bracket! 🏆
 • **\`@Tessia give me an anime quote\`** — Random anime quotes with beautiful embeds ✨
 
 🌟 **Server Info**
@@ -633,120 +700,124 @@ Here's what we've got for you! 🌸
       }
     }
 
-    // --- Feature #26: Airing Schedule Detection ---
-    let airingScheduleData = null;
-    const scheduleKeywords = ['airing today', 'airing this week', 'what\'s airing', 'whats airing', 'anime schedule', 'new episodes today', 'anime today', 'what anime is airing', 'anime airing today', 'episodes today', 'today\'s anime', 'what is airing'];
-    const isAskingSchedule = scheduleKeywords.some(k => lowerQuery.includes(k));
-    if (isAskingSchedule) {
+    // --- Feature #30: Blind Anime Ranking Game State Handler ---
+    const rankingGame = activeRankingGames.get(username);
+    const rankingStartKeywords = ['anime ranking game', 'ranking game', 'blind ranking', 'rank anime', 'anime tournament', 'blind anime ranking'];
+    const isStartingRankingGame = rankingStartKeywords.some(k => lowerQuery.includes(k));
+
+    if (rankingGame) {
+      const pick = lowerQuery.trim();
+
+      // Quit
+      if (pick === 'quit' || pick === 'stop' || pick === 'cancel') {
+        activeRankingGames.delete(username);
+        await message.reply(`Ranking game cancelled! 🌸 You can start a new one anytime with \`anime ranking game\`! ✨`);
+        return;
+      }
+
+      if (pick === 'a' || pick === 'b') {
+        const currentMatch = rankingGame.bracket[rankingGame.matchIndex];
+        if (!currentMatch) {
+          activeRankingGames.delete(username);
+          await message.reply(`Something went wrong with the bracket! Starting fresh — just say \`anime ranking game\`! 🌸`);
+          return;
+        }
+
+        const winner = pick === 'a' ? currentMatch[0] : currentMatch[1];
+        const loser = pick === 'a' ? currentMatch[1] : currentMatch[0];
+        rankingGame.winners.push(winner);
+        rankingGame.lastLoser = loser;
+        rankingGame.matchIndex++;
+
+        // Check if current round is complete
+        if (rankingGame.matchIndex >= rankingGame.bracket.length) {
+          // All matches in this round are done
+          if (rankingGame.winners.length === 1) {
+            // FINAL — we have a champion!
+            const champion = rankingGame.winners[0];
+            const runnerUp = rankingGame.lastLoser;
+            activeRankingGames.delete(username);
+            const revealEmbed = buildRankingRevealEmbed(champion, runnerUp);
+            await message.reply({
+              content: `🎉 **The blind tournament is over!** Your taste has spoken! ✨`,
+              embeds: revealEmbed ? [revealEmbed] : []
+            });
+            return;
+          }
+
+          // Set up next round
+          const nextBracket = [];
+          for (let i = 0; i < rankingGame.winners.length; i += 2) {
+            nextBracket.push([rankingGame.winners[i], rankingGame.winners[i + 1]]);
+          }
+          rankingGame.round++;
+          rankingGame.bracket = nextBracket;
+          rankingGame.matchIndex = 0;
+          rankingGame.winners = [];
+        }
+
+        // Show next match (or we just finished above)
+        if (activeRankingGames.has(username)) {
+          const nextMatch = rankingGame.bracket[rankingGame.matchIndex];
+          const roundName = rankingGame.round === 1 ? 'Quarterfinals' : rankingGame.round === 2 ? 'Semifinals' : 'Final';
+          const matchEmbed = buildRankingMatchEmbed(nextMatch[0], nextMatch[1], rankingGame.round, rankingGame.matchIndex + 1);
+          await message.reply({
+            content: `✅ **${winner.blindLabel}** advances! Next up — **${roundName}** 🔥`,
+            embeds: matchEmbed ? [matchEmbed] : []
+          });
+        }
+        return;
+      } else {
+        await message.reply(`Type **A** or **B** to pick your favorite, or **quit** to stop the game! 🌸`);
+        return;
+      }
+    }
+
+    // Start new ranking game
+    if (isStartingRankingGame) {
       try {
-        airingScheduleData = await getAiringSchedule();
-        if (airingScheduleData && airingScheduleData.length > 0) {
-          const scheduleText = airingScheduleData.map(a => `• ${a.title} — Episode ${a.episode} (airs at ${a.airingTime})`).join('\n');
-          systemPromptContent += `\n\n[REAL AIRING SCHEDULE DATA FOR TODAY — Use this verified data to answer. Present it naturally. Do NOT say you looked it up or mention any API/source.]\n${scheduleText}`;
+        const animePool = await getAnimeForRankingGame();
+        if (animePool && animePool.length === 8) {
+          // Build initial bracket (quarterfinals: 4 matches of 2)
+          const bracket = [];
+          for (let i = 0; i < 8; i += 2) {
+            bracket.push([animePool[i], animePool[i + 1]]);
+          }
+          activeRankingGames.set(username, {
+            bracket,
+            round: 1,
+            matchIndex: 0,
+            winners: [],
+            lastLoser: null
+          });
+          const firstMatch = bracket[0];
+          const matchEmbed = buildRankingMatchEmbed(firstMatch[0], firstMatch[1], 1, 1);
+          await message.reply({
+            content: `🏆 **Blind Anime Ranking Tournament!** 🏆\n\n8 mystery anime enter, 1 champion emerges! You'll judge them purely by their description, genres, and stats — **no titles revealed** until the end!\n\n**Round 1: Quarterfinals** — Match 1 of 4`,
+            embeds: matchEmbed ? [matchEmbed] : []
+          });
+          return;
         } else {
-          systemPromptContent += `\n\n[AIRING SCHEDULE: No anime episodes are scheduled to air today based on verified data. Tell the user honestly that there are no new episodes airing today and suggest checking back tomorrow or recommend something from their watchlist.]`;
+          await message.reply(`I couldn't set up the tournament right now 😢 Try again in a moment! 🌸`);
+          return;
         }
       } catch (err) {
-        console.error("Airing schedule error:", err);
+        console.error('Ranking game start error:', err);
+        await message.reply(`Something went wrong starting the ranking game! Try again 🌸`);
+        return;
       }
     }
 
-    // --- Feature #27: Character Search Detection ---
-    let characterEmbedData = null;
-    const characterPatterns = [
-      /(?:show\s+(?:me\s+)?(?:a\s+)?(?:picture|pic|image|photo|img)\s+(?:of\s+)?)(.*)/i,
-      /(?:picture|pic|image|photo)\s+(?:of\s+)(.*)/i,
-      /(?:what\s+does\s+)(.*?)(?:\s+look\s+like)/i,
-    ];
-    let characterSearchName = null;
-    for (const pattern of characterPatterns) {
-      const match = cleanQuery.match(pattern);
-      if (match && match[1]) {
-        characterSearchName = match[1].replace(/[?!.]+$/, '').trim();
-        break;
-      }
-    }
-    if (characterSearchName && characterSearchName.length >= 2) {
-      try {
-        characterEmbedData = await searchAniListCharacter(characterSearchName);
-        if (characterEmbedData) {
-          systemPromptContent += `\n\n[CHARACTER DATA FOUND — The user asked about "${characterSearchName}". Here is real data. Present it naturally as if you know it personally. A character image embed will be attached automatically, so do NOT say you cannot show images. Instead, briefly introduce the character.]\nName: ${characterEmbedData.name}\nFrom: ${characterEmbedData.mediaTitle}\nDescription: ${characterEmbedData.description}`;
-        }
-      } catch (err) {
-        console.error("Character search error:", err);
-      }
-    }
-
-    // --- Feature #28: Anime Quote Detection ---
-    let quoteEmbedData = null;
-    const quoteKeywords = ['anime quote', 'random quote', 'give me a quote', 'anime quotes', 'quote of the day', 'random anime quote'];
-    const isAskingQuote = quoteKeywords.some(k => lowerQuery.includes(k));
-    if (isAskingQuote) {
-      try {
-        quoteEmbedData = await getAnimeQuote();
-        if (quoteEmbedData) {
-          systemPromptContent += `\n\n[ANIME QUOTE — Present this quote naturally in a beautifully formatted way. Use a quote block. A rich embed will also be attached. Do NOT make up your own quote, use this exact one.]\nQuote: "${quoteEmbedData.quote}"\nCharacter: ${quoteEmbedData.character}\nAnime: ${quoteEmbedData.anime}`;
-        }
-      } catch (err) {
-        console.error("Anime quote error:", err);
-      }
-    }
-
-    // --- Feature #14: AniList Integration for accurate anime/manga/manhwa data ---
+    // --- Feature #31: Tool Calling replaces keyword detection ---
+    // Anime search, airing schedule, character search, quotes, and web search
+    // are now handled via Groq tool calling — the LLM decides which tools to use.
     let anilistEmbedData = null;
-    if (!isAskingSchedule && !characterSearchName && !isAskingQuote) {
-      let animeDetection = detectAnimeQuery(originalCleanQuery);
-      
-      // Fallback: If no title detected in user's query, but it is a reply to a non-bot message, check the referenced message
-      if (!animeDetection && referencedMessage && referencedMessage.author.id !== client.user.id) {
-        const refCleaned = referencedMessage.content
-          .replace(botMention, '')
-          .replace(botNicknameMention, '')
-          .trim();
-        animeDetection = detectAnimeQuery(refCleaned);
-      }
+    let characterEmbedData = null;
+    let quoteEmbedData = null;
 
-      if (animeDetection) {
-        try {
-          const anilistResult = await searchAniList(animeDetection.title, animeDetection.mediaType);
-          if (anilistResult) {
-            systemPromptContent += `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer accurately. Weave it naturally into your response in your own Tessia personality. Do NOT copy-paste it raw. Do NOT mention "AniList" or any data source name. Present the info as if you personally know it. If the user asked for "full form" or abbreviation meaning, the title below IS the answer.]\n${anilistResult.contextText}`;
-            anilistEmbedData = anilistResult.embedData;
-          }
-        } catch (err) {
-          console.error("AniList search error:", err);
-        }
-      }
-    }
-
-    // --- Feature #15: Brave Web Search for general knowledge ---
-    let webSearchContext = null;
-    if (!anilistEmbedData) {
-      const shouldSearch = detectWebSearchQuery(cleanQuery);
-      if (shouldSearch) {
-        try {
-          webSearchContext = await searchBrave(shouldSearch);
-          if (webSearchContext) {
-            systemPromptContent += `\n\n[WEB SEARCH RESULTS - Use these real search results to give an accurate, informed answer. Do NOT mention that you searched the web or cite sources. Present the info naturally as if you know it.]\n${webSearchContext}`;
-          }
-        } catch (err) {
-          console.error("Web search error:", err);
-        }
-      }
-    }
-
-    // --- Feature #17: Smart Anime Recommendations ---
-    const recKeywords = ['recommend', 'suggestion', 'suggest', 'what should i watch', 'what should i read', 'something like', 'similar to', 'give me anime', 'give me manga'];
-    if (recKeywords.some(k => lowerQuery.includes(k)) && userMemories.length > 0) {
-      try {
-        const recs = await getSmartRecommendations(userMemories);
-        if (recs && recs.length > 0) {
-          const recContext = recs.map(r => `• "${r.title}" (Score: ${r.score ? (r.score/10).toFixed(1) + '/10' : 'N/A'})`).join('\n');
-          systemPromptContent += `\n\n[PERSONALIZED RECOMMENDATIONS based on the user's favorites. Present these naturally as YOUR personal picks for them. Do NOT say "based on your data" or mention any algorithm/source.]\n${recContext}`;
-        }
-      } catch (err) {
-        console.error("Recommendation error:", err);
-      }
+    // Inject user memories for personalized recommendations
+    if (userMemories.length > 0) {
+      systemPromptContent += `\n\n[User's known preferences and facts: ${userMemories.join(', ')}. Use these to personalize your responses when relevant.]`;
     }
 
     const systemMessage = {
@@ -799,7 +870,7 @@ Think step-by-step about what they're really asking. Consider their preferences.
       }
     }
 
-    // --- Feature #10: Groq API Call with Fallback Model ---
+    // --- Feature #31: Groq API Call with Tool Calling ---
     let botResponse;
     const primaryModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
     const fallbackModel = 'llama-3.1-8b-instant';
@@ -807,20 +878,73 @@ Think step-by-step about what they're really asking. Consider their preferences.
     // Append reasoning context to system prompt if available
     const finalSystemMessage = {
       role: 'system',
-      content: systemPromptContent + reasoningContext
+      content: systemPromptContent + reasoningContext + '\n\n[TOOL USAGE RULES: You have access to tools for searching anime/manga data, airing schedules, character info, anime quotes, and web search. Use them when the user asks for specific information. Do NOT fabricate anime data — always use the search_anime_manga tool for specific titles. When a tool returns data, weave it naturally into your response. Do NOT mention tools, APIs, or data sources. Present info as if you personally know it. If a tool returns an image embed, do NOT say you cannot show images.]'
     };
 
-    try {
+    async function callGroqWithTools(model, messages, tools, temp, tokens) {
       const completion = await groq.chat.completions.create({
-        model: primaryModel,
-        messages: [finalSystemMessage, ...history, systemReminder],
-        temperature: 0.75,
-        max_tokens: maxTokens,
+        model,
+        messages,
+        tools,
+        tool_choice: 'auto',
+        temperature: temp,
+        max_tokens: tokens,
       });
-      botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+      return completion.choices[0]?.message;
+    }
+
+    try {
+      let responseMessage = await callGroqWithTools(primaryModel, [finalSystemMessage, ...history, systemReminder], TESSIA_TOOLS, 0.75, maxTokens);
+
+      // Tool calling loop — handle up to 3 rounds of tool calls
+      let toolRounds = 0;
+      const conversationMessages = [finalSystemMessage, ...history, systemReminder];
+      while (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0 && toolRounds < 3) {
+        toolRounds++;
+        console.log(`Tool call round ${toolRounds}: ${responseMessage.tool_calls.map(tc => tc.function.name).join(', ')}`);
+
+        // Add the assistant's tool call message
+        conversationMessages.push(responseMessage);
+
+        // Execute each tool call
+        for (const toolCall of responseMessage.tool_calls) {
+          let toolResult = null;
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            toolResult = await executeToolCall(toolCall.function.name, args, username);
+
+            // Collect embed data from tool results
+            if (toolCall.function.name === 'search_anime_manga' && toolResult?.embedData) {
+              anilistEmbedData = toolResult.embedData;
+              toolResult = toolResult.contextText; // Send only text context to LLM
+            }
+            if (toolCall.function.name === 'search_character' && toolResult) {
+              characterEmbedData = toolResult;
+            }
+            if (toolCall.function.name === 'get_anime_quote' && toolResult) {
+              quoteEmbedData = toolResult;
+            }
+          } catch (toolErr) {
+            console.error(`Tool ${toolCall.function.name} error:`, toolErr.message);
+            toolResult = { error: 'Tool call failed, answer from your own knowledge.' };
+          }
+
+          conversationMessages.push({
+            role: 'tool',
+            content: JSON.stringify(toolResult || { error: 'No results found' }),
+            tool_call_id: toolCall.id,
+          });
+        }
+
+        // Get next response (may contain more tool calls or final text)
+        responseMessage = await callGroqWithTools(primaryModel, conversationMessages, TESSIA_TOOLS, 0.75, maxTokens);
+      }
+
+      botResponse = responseMessage?.content || "I'm sorry, I couldn't generate a response.";
     } catch (primaryError) {
       console.warn(`Primary model (${primaryModel}) failed, falling back to ${fallbackModel}:`, primaryError.message);
       try {
+        // Fallback without tools (simpler, more reliable)
         const fallbackCompletion = await groq.chat.completions.create({
           model: fallbackModel,
           messages: [finalSystemMessage, ...history, systemReminder],
@@ -830,7 +954,7 @@ Think step-by-step about what they're really asking. Consider their preferences.
         botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
       } catch (fallbackError) {
         console.error("Both primary and fallback models failed:", fallbackError.message);
-        throw fallbackError; // Let the outer catch handle it with anime error messages
+        throw fallbackError;
       }
     }
 
@@ -1796,6 +1920,189 @@ async function getRandomCharacterForGame() {
     };
   } catch (err) {
     console.error('Random character fetch error:', err.message);
+    return null;
+  }
+}
+
+// --- Feature #31: Tool Call Executor ---
+async function executeToolCall(toolName, args, username) {
+  switch (toolName) {
+    case 'search_anime_manga': {
+      const result = await searchAniList(args.title, args.media_type || null);
+      return result; // { contextText, embedData }
+    }
+    case 'get_airing_schedule': {
+      const schedule = await getAiringSchedule();
+      if (schedule && schedule.length > 0) {
+        return schedule.map(a => `• ${a.title} — Episode ${a.episode} (airs at ${a.airingTime})`).join('\n');
+      }
+      return 'No anime episodes are scheduled to air today. Suggest checking back tomorrow.';
+    }
+    case 'search_character': {
+      const char = await searchAniListCharacter(args.name);
+      return char; // { name, mediaTitle, description, image }
+    }
+    case 'get_anime_quote': {
+      const quote = await getAnimeQuote();
+      return quote; // { quote, character, anime }
+    }
+    case 'web_search': {
+      const results = await searchBrave(args.query);
+      return results || 'No web search results found.';
+    }
+    default:
+      return { error: `Unknown tool: ${toolName}` };
+  }
+}
+
+// --- Feature #30: Blind Anime Ranking Game Functions ---
+async function getAnimeForRankingGame() {
+  try {
+    const alphabet = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    const query = `
+      query ($page: Int, $perPage: Int) {
+        Page(page: $page, perPage: $perPage) {
+          media(sort: POPULARITY_DESC, type: ANIME) {
+            id
+            title { romaji english }
+            genres
+            description(asHtml: false)
+            meanScore
+            format
+            episodes
+            coverImage { large }
+          }
+        }
+      }
+    `;
+
+    // Pick 2 random pages from top 200 (pages 1-4, 50 per page)
+    const pagesToFetch = new Set();
+    while (pagesToFetch.size < 2) {
+      pagesToFetch.add(Math.floor(Math.random() * 4) + 1);
+    }
+
+    let allAnime = [];
+    for (const page of pagesToFetch) {
+      const response = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query, variables: { page, perPage: 50 } })
+      });
+      if (!response.ok) continue;
+      const json = await response.json();
+      const media = json?.data?.Page?.media;
+      if (media && media.length > 0) allAnime.push(...media);
+    }
+
+    if (allAnime.length < 8) return null;
+
+    // Shuffle and pick 8
+    for (let i = allAnime.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allAnime[i], allAnime[j]] = [allAnime[j], allAnime[i]];
+    }
+    const selected = allAnime.slice(0, 8);
+
+    return selected.map((anime, index) => {
+      let cleanDesc = (anime.description || 'No description available.')
+        .replace(/<[^>]*>/g, '')
+        .replace(/~!.*?!~/gs, '[spoiler]');
+      if (cleanDesc.length > 150) cleanDesc = cleanDesc.substring(0, 147) + '...';
+      const realTitle = anime.title.english || anime.title.romaji || 'Unknown Title';
+
+      return {
+        id: anime.id,
+        blindLabel: `Anime ${alphabet[index]}`,
+        revealTitle: realTitle,
+        genres: anime.genres || [],
+        description: cleanDesc,
+        meanScore: anime.meanScore ?? 'N/A',
+        format: anime.format || 'Unknown',
+        episodes: anime.episodes ?? '?',
+        coverImage: anime.coverImage?.large || null,
+      };
+    });
+  } catch (error) {
+    console.error('Error in getAnimeForRankingGame:', error);
+    return null;
+  }
+}
+
+function buildRankingMatchEmbed(animeA, animeB, roundNum, matchNum) {
+  try {
+    const embed = new EmbedBuilder()
+      .setColor(0xF1C40F)
+      .setTitle(`🏆 Blind Anime Ranking — Round ${roundNum}, Match ${matchNum}`)
+      .setDescription('Two mystery anime face off! Read the clues and pick your favorite 🔍')
+      .addFields(
+        {
+          name: `📺 ${animeA.blindLabel}`,
+          value: [
+            `**Genres:** ${animeA.genres.length > 0 ? animeA.genres.join(', ') : 'N/A'}`,
+            `**Format:** ${animeA.format}  •  **Episodes:** ${animeA.episodes}`,
+            `**Score:** ${animeA.meanScore}/100`,
+            `\n> ${animeA.description}`,
+          ].join('\n'),
+          inline: false,
+        },
+        {
+          name: '\u200B',
+          value: '─────── **VS** ───────',
+          inline: false,
+        },
+        {
+          name: `📺 ${animeB.blindLabel}`,
+          value: [
+            `**Genres:** ${animeB.genres.length > 0 ? animeB.genres.join(', ') : 'N/A'}`,
+            `**Format:** ${animeB.format}  •  **Episodes:** ${animeB.episodes}`,
+            `**Score:** ${animeB.meanScore}/100`,
+            `\n> ${animeB.description}`,
+          ].join('\n'),
+          inline: false,
+        }
+      )
+      .setFooter({ text: 'Type A or B to pick your favorite!' })
+      .setTimestamp();
+    return embed;
+  } catch (error) {
+    console.error('Error in buildRankingMatchEmbed:', error);
+    return null;
+  }
+}
+
+function buildRankingRevealEmbed(winner, runnerUp) {
+  try {
+    const embed = new EmbedBuilder()
+      .setColor(0xFFD700)
+      .setTitle('🏆 Your Blind Champion!')
+      .setDescription(
+        `After all the blind rounds, your champion has been revealed!\n\n` +
+        `🥇 **Winner:** ${winner.revealTitle}\n` +
+        `🥈 **Runner-Up:** ${runnerUp.revealTitle}`
+      )
+      .addFields(
+        {
+          name: '📊 Winner Stats',
+          value: [
+            `**Genres:** ${winner.genres.length > 0 ? winner.genres.join(', ') : 'N/A'}`,
+            `**Format:** ${winner.format}  •  **Episodes:** ${winner.episodes}`,
+            `**AniList Score:** ${winner.meanScore}/100`,
+          ].join('\n'),
+          inline: false,
+        },
+        {
+          name: '📝 About the Winner',
+          value: `> ${winner.description}`,
+          inline: false,
+        }
+      )
+      .setFooter({ text: 'Blind Anime Ranking • Powered by Tessia' })
+      .setTimestamp();
+    if (winner.coverImage) embed.setThumbnail(winner.coverImage);
+    return embed;
+  } catch (error) {
+    console.error('Error in buildRankingRevealEmbed:', error);
     return null;
   }
 }
