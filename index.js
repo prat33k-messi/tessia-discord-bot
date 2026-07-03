@@ -907,7 +907,8 @@ Think step-by-step about what they're really asking. Consider their preferences.
     }
 
     try {
-      let responseMessage = await callGroqWithTools(primaryModel, [finalSystemMessage, ...history, systemReminder], TESSIA_TOOLS, 0.75, maxTokens);
+      // Step 1: Detect/execute tools at temperature 0.0 (strictly stable and reliable)
+      let responseMessage = await callGroqWithTools(primaryModel, [finalSystemMessage, ...history, systemReminder], TESSIA_TOOLS, 0.0, maxTokens);
 
       // Tool calling loop — handle up to 3 rounds of tool calls
       let toolRounds = 0;
@@ -950,10 +951,17 @@ Think step-by-step about what they're really asking. Consider their preferences.
         }
 
         // Get next response (may contain more tool calls or final text)
-        responseMessage = await callGroqWithTools(primaryModel, conversationMessages, TESSIA_TOOLS, 0.75, maxTokens);
+        responseMessage = await callGroqWithTools(primaryModel, conversationMessages, TESSIA_TOOLS, 0.0, maxTokens);
       }
 
-      botResponse = responseMessage?.content || "I'm sorry, I couldn't generate a response.";
+      // Step 2: Generate the final warm text response at temperature 0.75 without tools
+      const finalCompletion = await groq.chat.completions.create({
+        model: primaryModel,
+        messages: conversationMessages,
+        temperature: 0.75,
+        max_tokens: maxTokens,
+      });
+      botResponse = finalCompletion.choices[0]?.message?.content || responseMessage?.content || "I'm sorry, I couldn't generate a response.";
     } catch (primaryError) {
       console.warn(`Primary model (${primaryModel}) failed, falling back to ${fallbackModel}:`, primaryError.message);
       try {
