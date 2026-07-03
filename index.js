@@ -1331,6 +1331,24 @@ async function saveConversationSummary(username, history) {
   }
 }
 
+// Helpers to sanitize search queries from conversational filler prefixes
+function cleanAnimeTerm(term) {
+  if (!term) return '';
+  return term
+    .trim()
+    .replace(/^(?:tell me about|what is|what's|info on|information about|details about|details on|review of|synopsis of|about|news about|news on|latest news about|latest news on)\s+/i, '')
+    .replace(/\s+(?:latest|recent|new|current)?\s*(?:news|updates?|anime|manga|manhwa)?\s*$/i, '')
+    .trim();
+}
+
+function cleanCharacterTerm(term) {
+  if (!term) return '';
+  return term
+    .trim()
+    .replace(/^(?:show me a picture of|show me picture of|show me image of|show me pic of|picture of|pic of|image of|photo of|who is)\s+/i, '')
+    .trim();
+}
+
 // --- Feature #14: AniList API Integration for Anime/Manga/Manhwa ---
 // Common abbreviations and aliases that AniList might not recognize directly
 const ANIME_ALIASES = {
@@ -1443,9 +1461,10 @@ query ($search: String, $type: MediaType) {
 
 async function searchAniList(searchTerm, mediaType = null) {
   try {
+    const cleanedSearchTerm = cleanAnimeTerm(searchTerm);
     // Resolve aliases first
-    const resolvedTerm = ANIME_ALIASES[searchTerm.toLowerCase()] || searchTerm;
-    console.log(`[DEBUG] searchAniList called: searchTerm="${searchTerm}", resolved="${resolvedTerm}"`);
+    const resolvedTerm = ANIME_ALIASES[cleanedSearchTerm.toLowerCase()] || cleanedSearchTerm;
+    console.log(`[DEBUG] searchAniList called: searchTerm="${searchTerm}", cleaned="${cleanedSearchTerm}", resolved="${resolvedTerm}"`);
     
     // If no specific type, try MANGA first (covers manga + manhwa + manhua), then ANIME
     const typesToTry = mediaType ? [mediaType] : ['MANGA', 'ANIME'];
@@ -1803,6 +1822,8 @@ async function getAiringSchedule() {
 // --- Feature #27: AniList Character Search ---
 async function searchAniListCharacter(name) {
   try {
+    const cleanedName = cleanCharacterTerm(name);
+    console.log(`[DEBUG] searchAniListCharacter called: name="${name}", cleaned="${cleanedName}"`);
     const query = `
     query ($search: String) {
       Character(search: $search) {
@@ -1824,7 +1845,7 @@ async function searchAniListCharacter(name) {
     const response = await fetch('https://graphql.anilist.co', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ query, variables: { search: name } })
+      body: JSON.stringify({ query, variables: { search: cleanedName } })
     });
 
     if (!response.ok) return null;
@@ -1930,8 +1951,10 @@ function buildQuoteEmbed(data) {
 // --- Feature #32: Anime News from Jikan (MyAnimeList) API ---
 async function getAnimeNews(animeName) {
   try {
+    const cleanedAnimeName = cleanAnimeTerm(animeName);
+    console.log(`[DEBUG] getAnimeNews called: animeName="${animeName}", cleaned="${cleanedAnimeName}"`);
     // Step 1: Search for the anime on Jikan to get MAL ID
-    const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(animeName)}&limit=1&sfw=true`;
+    const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(cleanedAnimeName)}&limit=1&sfw=true`;
     const searchResponse = await fetch(searchUrl, {
       headers: { 'Accept': 'application/json' }
     });
