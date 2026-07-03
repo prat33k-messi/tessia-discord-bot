@@ -883,71 +883,95 @@ Think step-by-step about what they're really asking. Consider their preferences.
       }
     }
 
-    // --- Feature #31: Groq API Call with Tool Calling ---
+    // --- Feature #31: Intent Classifier & Context Injection ---
     let botResponse;
     const primaryModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
     const fallbackModel = 'llama-3.1-8b-instant';
 
-    // Append reasoning context to system prompt if available
-    const finalSystemMessage = {
-      role: 'system',
-      content: systemPromptContent + reasoningContext + '\n\n[TOOL USAGE RULES: You have access to tools for fetching real-time data (anime/manga info, schedules, character art, quotes, web searches). Use them when needed. When a tool returns data, weave it naturally into your response as if you personally know it. Do NOT mention tools, APIs, or data sources. If a tool returns an image embed, do NOT say you cannot show images.]'
-    };
-
-    async function callGroqWithTools(model, messages, tools, temp, tokens) {
-      const completion = await groq.chat.completions.create({
-        model,
-        messages,
-        tools,
-        tool_choice: 'auto',
-        temperature: temp,
-        max_tokens: tokens,
-      });
-      return completion.choices[0]?.message;
-    }
-
+    let toolContext = '';
     try {
-      // Step 1: Detect tools at temperature 0.0 (strictly stable and reliable)
-      let responseMessage = await callGroqWithTools(primaryModel, [finalSystemMessage, ...history, systemReminder], TESSIA_TOOLS, 0.0, maxTokens);
+      // Step 1: Classify user intent using the fast 8b model in strict JSON mode
+      const classification = await groq.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        messages: [{
+          role: 'system',
+          content: `You are an intent classifier for an anime bot. Analyze the user's input and classify it into one of these intents:
+- "anime_search": The user is explicitly asking for information, synopsis, ratings, details, or a summary of a specific anime, manga, manhwa, or light novel (e.g. "tell me about AoT", "what is Solo Leveling about", "info on JJK"). Do NOT classify casual mentions or greetings.
+- "character_search": The user is asking to see a picture of, or get details about, a specific character (e.g. "show me a picture of Eren", "who is Emilia").
+- "airing_schedule": The user is asking what is airing today, the anime release schedule, or when new episodes come out today.
+- "anime_quote": The user is explicitly asking for an anime quote.
+- "web_search": The user is asking about real-world facts, current events, release dates, news, or general knowledge that requires up-to-date information.
+- "casual_chat": None of the above (just general chatting, greeting, or talking).
 
-      let toolContext = '';
-      if (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0) {
-        console.log(`Detected tools: ${responseMessage.tool_calls.map(tc => tc.function.name).join(', ')}`);
+Output your decision strictly as a JSON object, like:
+{"intent": "anime_search", "term": "Attack on Titan"}
+OR
+{"intent": "casual_chat"}
 
-        // Execute each tool call and format the result directly as system context
-        for (const toolCall of responseMessage.tool_calls) {
-          try {
-            const args = JSON.parse(toolCall.function.arguments);
-            const toolResult = await executeToolCall(toolCall.function.name, args, username);
+Do NOT output any other text or explanation. Output ONLY the raw JSON object.`
+        }, {
+          role: 'user',
+          content: cleanQuery
+        }],
+        temperature: 0.0,
+        response_format: { type: "json_object" }
+      });
 
-            if (toolCall.function.name === 'search_anime_manga') {
-              if (toolResult?.embedData) {
-                anilistEmbedData = toolResult.embedData;
-                toolContext += `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer. Present it naturally in your Tessia personality. Do NOT mention any data source name. Present info as if you personally know it.]\n${toolResult.contextText}`;
-              }
-            } else if (toolCall.function.name === 'search_character') {
-              if (toolResult) {
-                characterEmbedData = toolResult;
-                toolContext += `\n\n[CHARACTER DATA FOUND - Present it naturally. A character image embed will be attached automatically, so do NOT say you cannot show images. Briefly introduce them.]\nName: ${toolResult.name}\nFrom: ${toolResult.mediaTitle}\nDescription: ${toolResult.description}`;
-              }
-            } else if (toolCall.function.name === 'get_anime_quote') {
-              if (toolResult) {
-                quoteEmbedData = toolResult;
-                toolContext += `\n\n[ANIME QUOTE - Present this quote naturally. Use a quote block. A quote embed will be attached.]\nQuote: "${toolResult.quote}"\nCharacter: ${toolResult.character}\nAnime: ${toolResult.anime}`;
-              }
-            } else if (toolCall.function.name === 'get_airing_schedule') {
-              toolContext += `\n\n[REAL AIRING SCHEDULE DATA FOR TODAY - Use this verified data to answer. Present it naturally.]\n${toolResult}`;
-            } else if (toolCall.function.name === 'web_search') {
-              toolContext += `\n\n[WEB SEARCH RESULTS - Use these real search results to give an accurate, informed answer. Present info naturally.]\n${toolResult}`;
+      const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
+      console.log(`Classified user intent: ${intentResult.intent} (term: ${intentResult.term || 'none'})`);
+
+      // Step 2: Execute the corresponding tool locally if an intent is matched
+      if (intentResult.intent !== 'casual_chat') {
+        let toolName = '';
+        let toolArgs = {};
+
+        if (intentResult.intent === 'anime_search') {
+          toolName = 'search_anime_manga';
+          toolArgs = { title: intentResult.term };
+        } else if (intentResult.intent === 'character_search') {
+          toolName = 'search_character';
+          toolArgs = { name: intentResult.term };
+        } else if (intentResult.intent === 'airing_schedule') {
+          toolName = 'get_airing_schedule';
+        } else if (intentResult.intent === 'anime_quote') {
+          toolName = 'get_anime_quote';
+        } else if (intentResult.intent === 'web_search') {
+          toolName = 'web_search';
+          toolArgs = { query: intentResult.term };
+        }
+
+        if (toolName) {
+          const toolResult = await executeToolCall(toolName, toolArgs, username);
+
+          if (toolName === 'search_anime_manga') {
+            if (toolResult?.embedData) {
+              anilistEmbedData = toolResult.embedData;
+              toolContext = `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer. Present it naturally in your Tessia personality. Do NOT mention any data source name. Present info as if you personally know it.]\n${toolResult.contextText}`;
             }
-          } catch (toolErr) {
-            console.error(`Tool ${toolCall.function.name} error:`, toolErr.message);
+          } else if (toolName === 'search_character') {
+            if (toolResult) {
+              characterEmbedData = toolResult;
+              toolContext = `\n\n[CHARACTER DATA FOUND - Present it naturally. A character image embed will be attached automatically, so do NOT say you cannot show images. Briefly introduce them.]\nName: ${toolResult.name}\nFrom: ${toolResult.mediaTitle}\nDescription: ${toolResult.description}`;
+            }
+          } else if (toolName === 'get_anime_quote') {
+            if (toolResult) {
+              quoteEmbedData = toolResult;
+              toolContext = `\n\n[ANIME QUOTE - Present this quote naturally. Use a quote block. A quote embed will be attached.]\nQuote: "${toolResult.quote}"\nCharacter: ${toolResult.character}\nAnime: ${toolResult.anime}`;
+            }
+          } else if (toolName === 'get_airing_schedule') {
+            toolContext = `\n\n[REAL AIRING SCHEDULE DATA FOR TODAY - Use this verified data to answer. Present it naturally.]\n${toolResult}`;
+          } else if (toolName === 'web_search') {
+            toolContext = `\n\n[WEB SEARCH RESULTS - Use these real search results to give an accurate, informed answer. Present info naturally.]\n${toolResult}`;
           }
         }
       }
+    } catch (err) {
+      console.error("Intent classification or tool execution failed:", err);
+    }
 
-      // Step 2: Generate the final warm text response at temperature 0.75 using the clean system prompt
-      const finalCompletion = await groq.chat.completions.create({
+    // Step 3: Generate the final warm text response at temperature 0.75
+    try {
+      const completion = await groq.chat.completions.create({
         model: primaryModel,
         messages: [
           { role: 'system', content: systemPromptContent + reasoningContext + toolContext },
@@ -957,18 +981,17 @@ Think step-by-step about what they're really asking. Consider their preferences.
         temperature: 0.75,
         max_tokens: maxTokens,
       });
-      botResponse = finalCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+      botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
     } catch (primaryError) {
       console.warn(`Primary model (${primaryModel}) failed, falling back to ${fallbackModel}:`, primaryError.message);
       try {
-        // Fallback without tools (simpler, more reliable) using a clean system prompt
-        const fallbackSystemMessage = {
-          role: 'system',
-          content: systemPromptContent + reasoningContext
-        };
         const fallbackCompletion = await groq.chat.completions.create({
           model: fallbackModel,
-          messages: [fallbackSystemMessage, ...history, systemReminder],
+          messages: [
+            { role: 'system', content: systemPromptContent + reasoningContext + toolContext },
+            ...history,
+            systemReminder
+          ],
           temperature: 0.7,
           max_tokens: maxTokens,
         });
