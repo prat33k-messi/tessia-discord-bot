@@ -907,61 +907,57 @@ Think step-by-step about what they're really asking. Consider their preferences.
     }
 
     try {
-      // Step 1: Detect/execute tools at temperature 0.0 (strictly stable and reliable)
+      // Step 1: Detect tools at temperature 0.0 (strictly stable and reliable)
       let responseMessage = await callGroqWithTools(primaryModel, [finalSystemMessage, ...history, systemReminder], TESSIA_TOOLS, 0.0, maxTokens);
 
-      // Tool calling loop — handle up to 3 rounds of tool calls
-      let toolRounds = 0;
-      const conversationMessages = [finalSystemMessage, ...history, systemReminder];
-      while (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0 && toolRounds < 3) {
-        toolRounds++;
-        console.log(`Tool call round ${toolRounds}: ${responseMessage.tool_calls.map(tc => tc.function.name).join(', ')}`);
+      let toolContext = '';
+      if (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0) {
+        console.log(`Detected tools: ${responseMessage.tool_calls.map(tc => tc.function.name).join(', ')}`);
 
-        // Add the assistant's tool call message
-        conversationMessages.push(responseMessage);
-
-        // Execute each tool call
+        // Execute each tool call and format the result directly as system context
         for (const toolCall of responseMessage.tool_calls) {
-          let toolResult = null;
           try {
             const args = JSON.parse(toolCall.function.arguments);
-            toolResult = await executeToolCall(toolCall.function.name, args, username);
+            const toolResult = await executeToolCall(toolCall.function.name, args, username);
 
-            // Collect embed data from tool results
-            if (toolCall.function.name === 'search_anime_manga' && toolResult?.embedData) {
-              anilistEmbedData = toolResult.embedData;
-              toolResult = toolResult.contextText; // Send only text context to LLM
-            }
-            if (toolCall.function.name === 'search_character' && toolResult) {
-              characterEmbedData = toolResult;
-            }
-            if (toolCall.function.name === 'get_anime_quote' && toolResult) {
-              quoteEmbedData = toolResult;
+            if (toolCall.function.name === 'search_anime_manga') {
+              if (toolResult?.embedData) {
+                anilistEmbedData = toolResult.embedData;
+                toolContext += `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer. Present it naturally in your Tessia personality. Do NOT mention any data source name. Present info as if you personally know it.]\n${toolResult.contextText}`;
+              }
+            } else if (toolCall.function.name === 'search_character') {
+              if (toolResult) {
+                characterEmbedData = toolResult;
+                toolContext += `\n\n[CHARACTER DATA FOUND - Present it naturally. A character image embed will be attached automatically, so do NOT say you cannot show images. Briefly introduce them.]\nName: ${toolResult.name}\nFrom: ${toolResult.mediaTitle}\nDescription: ${toolResult.description}`;
+              }
+            } else if (toolCall.function.name === 'get_anime_quote') {
+              if (toolResult) {
+                quoteEmbedData = toolResult;
+                toolContext += `\n\n[ANIME QUOTE - Present this quote naturally. Use a quote block. A quote embed will be attached.]\nQuote: "${toolResult.quote}"\nCharacter: ${toolResult.character}\nAnime: ${toolResult.anime}`;
+              }
+            } else if (toolCall.function.name === 'get_airing_schedule') {
+              toolContext += `\n\n[REAL AIRING SCHEDULE DATA FOR TODAY - Use this verified data to answer. Present it naturally.]\n${toolResult}`;
+            } else if (toolCall.function.name === 'web_search') {
+              toolContext += `\n\n[WEB SEARCH RESULTS - Use these real search results to give an accurate, informed answer. Present info naturally.]\n${toolResult}`;
             }
           } catch (toolErr) {
             console.error(`Tool ${toolCall.function.name} error:`, toolErr.message);
-            toolResult = { error: 'Tool call failed, answer from your own knowledge.' };
           }
-
-          conversationMessages.push({
-            role: 'tool',
-            content: JSON.stringify(toolResult || { error: 'No results found' }),
-            tool_call_id: toolCall.id,
-          });
         }
-
-        // Get next response (may contain more tool calls or final text)
-        responseMessage = await callGroqWithTools(primaryModel, conversationMessages, TESSIA_TOOLS, 0.0, maxTokens);
       }
 
-      // Step 2: Generate the final warm text response at temperature 0.75 without tools
+      // Step 2: Generate the final warm text response at temperature 0.75 using the clean system prompt
       const finalCompletion = await groq.chat.completions.create({
         model: primaryModel,
-        messages: conversationMessages,
+        messages: [
+          { role: 'system', content: systemPromptContent + reasoningContext + toolContext },
+          ...history,
+          systemReminder
+        ],
         temperature: 0.75,
         max_tokens: maxTokens,
       });
-      botResponse = finalCompletion.choices[0]?.message?.content || responseMessage?.content || "I'm sorry, I couldn't generate a response.";
+      botResponse = finalCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
     } catch (primaryError) {
       console.warn(`Primary model (${primaryModel}) failed, falling back to ${fallbackModel}:`, primaryError.message);
       try {
