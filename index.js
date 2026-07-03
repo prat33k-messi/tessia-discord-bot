@@ -1078,9 +1078,6 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
       history.splice(0, history.length - MAX_MEMORY_LIMIT);
     }
 
-    // Add a 2-second delay to make it feel natural
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
     // Send response — with rich embed if AniList/Character/Quote data is available
     const replyOptions = {};
     const embeds = [];
