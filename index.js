@@ -79,68 +79,7 @@ const activeGames = new Map(); // Map username -> { character, hints, guessCount
 // --- NEW FEATURE: Blind Anime Ranking Game (#30) ---
 const activeRankingGames = new Map(); // Map username -> { anime[], bracket[], round, match, winner }
 
-// --- Feature #31: Groq Tool Calling Definitions ---
-const TESSIA_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "search_anime_manga",
-      description: "Search for detailed information about a specific anime, manga, manhwa, webtoon, or light novel. Call this when the user asks about a specific title, wants ratings, episode count, synopsis, genres, studio, or recommendations for a specific series. Also call when the user uses abbreviations like AOT, JJK, TBATE, etc.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "The title or abbreviation of the anime/manga to search for (e.g. 'Attack on Titan', 'JJK', 'Solo Leveling')" },
-          media_type: { type: "string", enum: ["ANIME", "MANGA"], description: "Optional. ANIME for anime/donghua, MANGA for manga/manhwa/webtoon/light novel." }
-        },
-        required: ["title"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_airing_schedule",
-      description: "Get the real-time anime airing schedule for today. Call when the user asks what anime is airing today, what new episodes are coming out, the anime schedule, or anything about today's releases.",
-      parameters: { type: "object", properties: {}, required: [] }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_character",
-      description: "Search for an anime/manga character to get their image, description, and media appearances. Call when the user asks to see a character, wants a picture/image of a character, asks 'who is [character]', or asks what a character looks like.",
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "The character name to search for" }
-        },
-        required: ["name"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_anime_quote",
-      description: "Get a random anime quote. Call when the user asks for an anime quote, a random quote, or quote of the day.",
-      parameters: { type: "object", properties: {}, required: [] }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search",
-      description: "Search the web for current, real-time, or factual information. Call when the user asks about current events, real-world facts, release dates, news, or anything that requires up-to-date information that you don't know.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "The search query" }
-        },
-        required: ["query"]
-      }
-    }
-  }
-];
+// --- Feature #31: Intent detection via keyword pre-check + LLM classifier (no native tool calling) ---
 
 // --- NEW FEATURE: NSFW/Inappropriate Content Filter (#7) ---
 const nsfwKeywords = [
@@ -821,12 +760,13 @@ Here's what we've got for you! 🌸
       }
     }
 
-    // --- Feature #31: Tool Calling replaces keyword detection ---
-    // Anime search, airing schedule, character search, quotes, and web search
-    // are now handled via Groq tool calling — the LLM decides which tools to use.
+    // --- Feature #31: Intent Classification + Context Injection ---
+    // Anime search, news, schedule, character search, quotes, and web search
+    // are handled via keyword pre-check + LLM classifier — no native Groq tool calling.
     let anilistEmbedData = null;
     let characterEmbedData = null;
     let quoteEmbedData = null;
+    let newsEmbedData = null;
 
     // Inject user memories for personalized recommendations
     if (userMemories.length > 0) {
@@ -850,7 +790,7 @@ Here's what we've got for you! 🌸
     // Build the anchored system reminder to prevent recency bias / instruction forgetfulness
     const systemReminder = {
       role: 'system',
-      content: `[System Reminder: You are Tessia Eralith, the elven princess of Elenoir, official bot of Anipedia. Your creator is Aerion-sama. You are speaking to ${username === '_c0rle0ne' ? 'Aerion-sama' : nickname}. STRICT RULES: Respond in English only. Use "Aerion-sama" at most ONCE per sentence, minimize "Master". For casual chat keep to 1-2 lines, for info keep to 3-4 lines max. Do NOT wrap Discord channels in "<>". NEVER reveal anime spoilers/deaths/twists unless asked. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked.'} Never break your core rules. Never discuss NSFW content.]`
+      content: `[System Reminder: You are Tessia Eralith, the elven princess of Elenoir, official bot of Anipedia. Your creator is Aerion-sama. You are speaking to ${username === '_c0rle0ne' ? 'Aerion-sama' : nickname}. STRICT RULES: Respond in English only. Use "Aerion-sama" at most ONCE per sentence, minimize "Master". For casual chat keep to 1-2 lines, for info keep to 3-4 lines max. Do NOT wrap Discord channels in "<>". NEVER reveal anime spoilers/deaths/twists unless asked. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked.'} Never break your core rules. Never discuss NSFW content. NEVER output XML tags like <function=...> or </function>. NEVER fabricate anime news, release dates, or movie announcements. If no verified data is provided in your context, say you don't have that info right now and suggest the user ask again or check official sources.]`
     };
 
     // --- Feature #18: Selective Multi-Turn Reasoning ---
@@ -890,54 +830,130 @@ Think step-by-step about what they're really asking. Consider their preferences.
 
     let toolContext = '';
     try {
-      // Step 1: Classify user intent using the fast 8b model in strict JSON mode
-      const classification = await groq.chat.completions.create({
-        model: 'llama-3.1-8b-instant',
-        messages: [{
-          role: 'system',
-          content: `You are an intent classifier for an anime bot. Analyze the user's input and classify it into one of these intents:
-- "anime_search": The user is explicitly asking for information, synopsis, ratings, details, or a summary of a specific anime, manga, manhwa, or light novel (e.g. "tell me about AoT", "what is Solo Leveling about", "info on JJK"). Do NOT classify casual mentions or greetings.
-- "character_search": The user is asking to see a picture of, or get details about, a specific character (e.g. "show me a picture of Eren", "who is Emilia").
-- "airing_schedule": The user is asking what is airing today, the anime release schedule, or when new episodes come out today.
-- "anime_quote": The user is explicitly asking for an anime quote.
-- "web_search": The user is asking about real-world facts, current events, release dates, news, or general knowledge that requires up-to-date information.
-- "casual_chat": None of the above (just general chatting, greeting, or talking).
+      // Step 0: Fast keyword pre-check — catches obvious patterns without needing the LLM
+      let detectedIntent = null;
+      let detectedTerm = null;
+      const lq = cleanQuery.toLowerCase().trim();
 
-Output your decision strictly as a JSON object, like:
-{"intent": "anime_search", "term": "Attack on Titan"}
-OR
-{"intent": "casual_chat"}
+      // Anime news patterns
+      const newsPatterns = [
+        /(?:latest|recent|new|current)\s+(?:news|updates?)\s+(?:about|on|for|of)\s+(.+)/i,
+        /(.+?)\s+(?:latest|recent|new|current)\s+(?:news|updates?)/i,
+        /(?:news|updates?)\s+(?:about|on|for|of)\s+(.+)/i,
+        /(.+?)\s+news$/i,
+        /tell me (?:the )?(?:latest )?news (?:about|on|for|of) (.+)/i
+      ];
+      for (const pattern of newsPatterns) {
+        const match = cleanQuery.match(pattern);
+        if (match && match[1]) {
+          detectedIntent = 'anime_news';
+          detectedTerm = match[1].replace(/\b(anime|manga|manhwa)\b/gi, '').trim();
+          break;
+        }
+      }
 
-Do NOT output any other text or explanation. Output ONLY the raw JSON object.`
-        }, {
-          role: 'user',
-          content: cleanQuery
-        }],
-        temperature: 0.0,
-        response_format: { type: "json_object" }
-      });
+      // Anime search patterns (if not already matched as news)
+      if (!detectedIntent) {
+        const searchPatterns = [
+          /^(?:tell me about|what is|what's|info on|information about|details (?:about|on)|review of|synopsis of|about)\s+(.+)/i,
+          /^(?:tell me about|what is)\s+(.+?)\s*(?:anime|manga|manhwa)?\s*$/i
+        ];
+        for (const pattern of searchPatterns) {
+          const match = cleanQuery.match(pattern);
+          if (match && match[1] && match[1].split(/\s+/).length <= 8) {
+            // Make sure it's not a news query or casual
+            const term = match[1].replace(/\b(anime|manga|manhwa|the)\b/gi, '').trim();
+            if (term.length > 1) {
+              detectedIntent = 'anime_search';
+              detectedTerm = term;
+              break;
+            }
+          }
+        }
+      }
 
-      const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
-      console.log(`Classified user intent: ${intentResult.intent} (term: ${intentResult.term || 'none'})`);
+      // Character search patterns
+      if (!detectedIntent) {
+        const charPatterns = [
+          /(?:show me|show)\s+(?:a )?(?:picture|pic|image|photo|img)\s+(?:of\s+)?(.+)/i,
+          /(?:picture|pic|image|photo)\s+(?:of\s+)?(.+)/i,
+          /who is (.+?)(?:\?|$)/i
+        ];
+        for (const pattern of charPatterns) {
+          const match = cleanQuery.match(pattern);
+          if (match && match[1] && match[1].trim().length > 1) {
+            detectedIntent = 'character_search';
+            detectedTerm = match[1].trim();
+            break;
+          }
+        }
+      }
 
-      // Step 2: Execute the corresponding tool locally if an intent is matched
-      if (intentResult.intent !== 'casual_chat') {
+      // Airing schedule patterns
+      if (!detectedIntent && (lq.includes('airing today') || lq.includes('airing this') || lq.includes('anime schedule') || lq.includes('what is airing') || lq.includes('what anime is airing') || lq.includes('episodes today') || lq.includes('new episodes'))) {
+        detectedIntent = 'airing_schedule';
+      }
+
+      // Anime quote patterns
+      if (!detectedIntent && (lq.includes('anime quote') || lq.includes('random quote') || lq.includes('give me a quote') || lq === 'quote')) {
+        detectedIntent = 'anime_quote';
+      }
+
+      // Step 1: If keyword pre-check didn't match, use the LLM classifier as fallback
+      if (!detectedIntent) {
+        const classification = await groq.chat.completions.create({
+          model: 'llama-3.1-8b-instant',
+          messages: [{
+            role: 'system',
+            content: `You are an intent classifier for an anime Discord bot. Classify the user's message into ONE intent.
+
+Intents:
+- "anime_search": Asking for info/synopsis/ratings/details about a specific anime, manga, manhwa, or light novel title.
+- "anime_news": Asking for latest news, updates, or announcements about a specific anime or manga title.
+- "character_search": Asking to see or learn about a specific anime/manga character.
+- "airing_schedule": Asking what anime is airing today or this week.
+- "anime_quote": Asking for an anime quote.
+- "web_search": Asking about real-world facts, current events, or general knowledge needing up-to-date info.
+- "casual_chat": General chatting, greetings, or anything not covered above.
+
+Output ONLY a JSON object: {"intent": "...", "term": "..."}
+For casual_chat, omit term: {"intent": "casual_chat"}`
+          }, {
+            role: 'user',
+            content: cleanQuery
+          }],
+          temperature: 0.0,
+          response_format: { type: "json_object" }
+        });
+
+        const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
+        detectedIntent = intentResult.intent;
+        detectedTerm = intentResult.term || null;
+      }
+
+      console.log(`Intent: ${detectedIntent} | Term: ${detectedTerm || 'none'}`);
+
+      // Step 2: Execute the tool locally based on the detected intent
+      if (detectedIntent && detectedIntent !== 'casual_chat') {
         let toolName = '';
         let toolArgs = {};
 
-        if (intentResult.intent === 'anime_search') {
+        if (detectedIntent === 'anime_search') {
           toolName = 'search_anime_manga';
-          toolArgs = { title: intentResult.term };
-        } else if (intentResult.intent === 'character_search') {
+          toolArgs = { title: detectedTerm };
+        } else if (detectedIntent === 'anime_news') {
+          toolName = 'get_anime_news';
+          toolArgs = { anime_name: detectedTerm };
+        } else if (detectedIntent === 'character_search') {
           toolName = 'search_character';
-          toolArgs = { name: intentResult.term };
-        } else if (intentResult.intent === 'airing_schedule') {
+          toolArgs = { name: detectedTerm };
+        } else if (detectedIntent === 'airing_schedule') {
           toolName = 'get_airing_schedule';
-        } else if (intentResult.intent === 'anime_quote') {
+        } else if (detectedIntent === 'anime_quote') {
           toolName = 'get_anime_quote';
-        } else if (intentResult.intent === 'web_search') {
+        } else if (detectedIntent === 'web_search') {
           toolName = 'web_search';
-          toolArgs = { query: intentResult.term };
+          toolArgs = { query: detectedTerm };
         }
 
         if (toolName) {
@@ -947,14 +963,32 @@ Do NOT output any other text or explanation. Output ONLY the raw JSON object.`
             if (toolResult?.embedData) {
               anilistEmbedData = toolResult.embedData;
               toolContext = `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer. Present it naturally in your Tessia personality. Do NOT mention any data source name. Present info as if you personally know it.]\n${toolResult.contextText}`;
+            } else if (toolResult?.rateLimited) {
+              toolContext = `\n\n[The anime database is temporarily busy. Tell the user: "I couldn't fetch the details right now, could you ask me again in a moment? 🌸" Do NOT make up any data.]`;
+            }
+          } else if (toolName === 'get_anime_news') {
+            if (toolResult?.articles && toolResult.articles.length > 0) {
+              newsEmbedData = toolResult;
+              let newsContext = `\n\n[VERIFIED LATEST NEWS for "${toolResult.animeName}" — Present these real news articles naturally. Summarize the top headlines briefly.]\n`;
+              toolResult.articles.forEach((a, i) => {
+                newsContext += `${i + 1}. ${a.title} (${a.date})\n`;
+                if (a.excerpt) newsContext += `   ${a.excerpt}\n`;
+              });
+              toolContext = newsContext;
+            } else if (toolResult?.rateLimited) {
+              toolContext = `\n\n[The news service is temporarily busy. Tell the user: "I couldn't fetch the latest news right now, could you ask me again in a moment? 🌸" Do NOT make up any news.]`;
+            } else {
+              toolContext = `\n\n[No recent news articles were found for this anime. Tell the user honestly that there aren't any recent news updates available right now, and suggest checking official sources or asking again later.]`;
             }
           } else if (toolName === 'search_character') {
-            if (toolResult) {
+            if (toolResult && !toolResult.rateLimited) {
               characterEmbedData = toolResult;
               toolContext = `\n\n[CHARACTER DATA FOUND - Present it naturally. A character image embed will be attached automatically, so do NOT say you cannot show images. Briefly introduce them.]\nName: ${toolResult.name}\nFrom: ${toolResult.mediaTitle}\nDescription: ${toolResult.description}`;
+            } else if (toolResult?.rateLimited) {
+              toolContext = `\n\n[The character database is temporarily busy. Tell the user: "I couldn't look up that character right now, could you ask me again in a moment? 🌸"]`;
             }
           } else if (toolName === 'get_anime_quote') {
-            if (toolResult) {
+            if (toolResult && !toolResult.rateLimited) {
               quoteEmbedData = toolResult;
               toolContext = `\n\n[ANIME QUOTE - Present this quote naturally. Use a quote block. A quote embed will be attached.]\nQuote: "${toolResult.quote}"\nCharacter: ${toolResult.character}\nAnime: ${toolResult.anime}`;
             }
@@ -1002,6 +1036,12 @@ Do NOT output any other text or explanation. Output ONLY the raw JSON object.`
       }
     }
 
+    // Fail-safe: strip any leaked <function=...> XML tags from the bot response
+    botResponse = botResponse.replace(/<function=[^>]*>[^<]*<\/function>/g, '').trim();
+    botResponse = botResponse.replace(/<function=[^>]*\/>/g, '').trim();
+    // Also strip any partial function tags that might appear
+    botResponse = botResponse.replace(/<\/?function[^>]*>/g, '').trim();
+
     // Fail-safe global replace to ensure Aerion-sama's Discord username never leaks in Tessia's replies
     botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
 
@@ -1015,10 +1055,11 @@ Do NOT output any other text or explanation. Output ONLY the raw JSON object.`
     if (openers.length > 3) openers.shift(); // Keep only last 3
     lastResponseOpeners.set(username, openers);
 
-    // Add assistant response to history
+    // Add assistant response to history (sanitized — strip any XML tags)
+    const sanitizedResponse = botResponse.replace(/<function=[^>]*>[^<]*<\/function>/g, '').replace(/<\/?function[^>]*>/g, '').trim();
     history.push({
       role: 'assistant',
-      content: botResponse,
+      content: sanitizedResponse,
     });
 
     // Prune history to respect memory limit
@@ -1036,6 +1077,7 @@ Do NOT output any other text or explanation. Output ONLY the raw JSON object.`
     if (anilistEmbedData) embeds.push(buildAniListEmbed(anilistEmbedData));
     if (characterEmbedData) embeds.push(buildCharacterEmbed(characterEmbedData));
     if (quoteEmbedData) embeds.push(buildQuoteEmbed(quoteEmbedData));
+    if (newsEmbedData) embeds.push(buildAnimeNewsEmbed(newsEmbedData));
     if (embeds.length > 0) replyOptions.embeds = embeds;
 
     if (botResponse.length <= 2000) {
@@ -1869,6 +1911,106 @@ function buildQuoteEmbed(data) {
   return embed;
 }
 
+// --- Feature #32: Anime News from Jikan (MyAnimeList) API ---
+async function getAnimeNews(animeName) {
+  try {
+    // Step 1: Search for the anime on Jikan to get MAL ID
+    const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(animeName)}&limit=1&sfw=true`;
+    const searchResponse = await fetch(searchUrl, {
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (searchResponse.status === 429) {
+      console.warn('Jikan API rate limited on search');
+      return { rateLimited: true };
+    }
+    if (!searchResponse.ok) return null;
+
+    const searchData = await searchResponse.json();
+    const anime = searchData?.data?.[0];
+    if (!anime) return null;
+
+    const malId = anime.mal_id;
+    const resolvedName = anime.title_english || anime.title || animeName;
+    const coverImage = anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || null;
+
+    // Jikan requires 1 second between requests to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Step 2: Fetch news for this anime
+    const newsUrl = `https://api.jikan.moe/v4/anime/${malId}/news`;
+    const newsResponse = await fetch(newsUrl, {
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (newsResponse.status === 429) {
+      console.warn('Jikan API rate limited on news fetch');
+      return { rateLimited: true };
+    }
+    if (!newsResponse.ok) return null;
+
+    const newsData = await newsResponse.json();
+    const articles = newsData?.data || [];
+
+    if (articles.length === 0) return { animeName: resolvedName, articles: [], coverImage };
+
+    // Take top 5 latest news articles
+    const topArticles = articles.slice(0, 5).map(article => {
+      const dateStr = article.date ? new Date(article.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Unknown date';
+      let excerpt = article.excerpt || article.comments_count ? `${article.comments_count || 0} comments` : '';
+      // Clean HTML from excerpt
+      excerpt = excerpt.replace(/<[^>]*>/g, '').substring(0, 150);
+
+      return {
+        title: article.title || 'Untitled',
+        url: article.url || '',
+        date: dateStr,
+        excerpt: excerpt,
+        authorUsername: article.author_username || 'MyAnimeList',
+        forumUrl: article.forum_url || ''
+      };
+    });
+
+    return {
+      animeName: resolvedName,
+      malId,
+      articles: topArticles,
+      coverImage
+    };
+  } catch (err) {
+    console.error('Anime news fetch error:', err.message);
+    return null;
+  }
+}
+
+// --- Feature #32: Build Anime News Discord Embed ---
+function buildAnimeNewsEmbed(data) {
+  const embed = new EmbedBuilder()
+    .setColor(0x2E51A2) // MyAnimeList blue
+    .setTitle(`📰 Latest News: ${data.animeName}`)
+    .setURL(`https://myanimelist.net/anime/${data.malId}`);
+
+  if (data.coverImage) embed.setThumbnail(data.coverImage);
+
+  const fields = [];
+  data.articles.forEach((article, i) => {
+    const value = article.url
+      ? `[Read more](${article.url}) • ${article.date}${article.excerpt ? `\n> ${article.excerpt}` : ''}`
+      : `${article.date}${article.excerpt ? `\n> ${article.excerpt}` : ''}`;
+    fields.push({
+      name: `${i + 1}. ${article.title.substring(0, 100)}`,
+      value: value.substring(0, 1024),
+      inline: false
+    });
+  });
+
+  embed.addFields(fields);
+  embed.setFooter({ text: 'News from MyAnimeList • Powered by Jikan API' });
+  embed.setTimestamp();
+
+  return embed;
+}
+
 // --- Feature #29: Get Random Character for Guessing Game ---
 async function getRandomCharacterForGame() {
   try {
@@ -1973,7 +2115,11 @@ async function executeToolCall(toolName, args, username) {
   switch (toolName) {
     case 'search_anime_manga': {
       const result = await searchAniList(args.title, args.media_type || null);
-      return result; // { contextText, embedData }
+      return result; // { contextText, embedData } or null
+    }
+    case 'get_anime_news': {
+      const news = await getAnimeNews(args.anime_name);
+      return news; // { animeName, malId, articles[], coverImage } or null or { rateLimited }
     }
     case 'get_airing_schedule': {
       const schedule = await getAiringSchedule();
