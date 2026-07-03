@@ -834,6 +834,7 @@ Think step-by-step about what they're really asking. Consider their preferences.
       let detectedIntent = null;
       let detectedTerm = null;
       const lq = cleanQuery.toLowerCase().trim();
+      console.log(`[DEBUG] cleanQuery = "${cleanQuery}", lq = "${lq}"`);
 
       // Anime news patterns
       const newsPatterns = [
@@ -848,6 +849,7 @@ Think step-by-step about what they're really asking. Consider their preferences.
         if (match && match[1]) {
           detectedIntent = 'anime_news';
           detectedTerm = match[1].replace(/\b(anime|manga|manhwa)\b/gi, '').trim();
+          console.log(`[DEBUG] News keyword match: intent=${detectedIntent}, term=${detectedTerm}`);
           break;
         }
       }
@@ -866,6 +868,7 @@ Think step-by-step about what they're really asking. Consider their preferences.
             if (term.length > 1) {
               detectedIntent = 'anime_search';
               detectedTerm = term;
+              console.log(`[DEBUG] Search keyword match: intent=${detectedIntent}, term=${detectedTerm}`);
               break;
             }
           }
@@ -931,6 +934,7 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
         detectedTerm = intentResult.term || null;
       }
 
+      console.log(`[DEBUG] Final Intent: ${detectedIntent} | Term: ${detectedTerm || 'none'}`);
       console.log(`Intent: ${detectedIntent} | Term: ${detectedTerm || 'none'}`);
 
       // Step 2: Execute the tool locally based on the detected intent
@@ -957,7 +961,9 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
         }
 
         if (toolName) {
+          console.log(`[DEBUG] Calling executeToolCall: ${toolName} with args:`, JSON.stringify(toolArgs));
           const toolResult = await executeToolCall(toolName, toolArgs, username);
+          console.log(`[DEBUG] Tool result type: ${typeof toolResult}, isNull: ${toolResult === null}, keys: ${toolResult ? Object.keys(toolResult).join(',') : 'null'}`);
 
           if (toolName === 'search_anime_manga') {
             if (toolResult?.embedData) {
@@ -1000,8 +1006,10 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
         }
       }
     } catch (err) {
-      console.error("Intent classification or tool execution failed:", err);
+      console.error("[DEBUG] Intent classification or tool execution FAILED:", err.message, err.stack);
     }
+
+    console.log(`[DEBUG] Pre-LLM state: toolContext length=${toolContext.length}, anilistEmbed=${!!anilistEmbedData}, newsEmbed=${!!newsEmbedData}, charEmbed=${!!characterEmbedData}`);
 
     // Step 3: Generate the final warm text response at temperature 0.75
     try {
@@ -1434,22 +1442,27 @@ async function searchAniList(searchTerm, mediaType = null) {
   try {
     // Resolve aliases first
     const resolvedTerm = ANIME_ALIASES[searchTerm.toLowerCase()] || searchTerm;
+    console.log(`[DEBUG] searchAniList called: searchTerm="${searchTerm}", resolved="${resolvedTerm}"`);
     
     // If no specific type, try MANGA first (covers manga + manhwa + manhua), then ANIME
     const typesToTry = mediaType ? [mediaType] : ['MANGA', 'ANIME'];
     
     for (const type of typesToTry) {
       try {
+        console.log(`[DEBUG] AniList API request: type=${type}, search="${resolvedTerm}"`);
         const response = await fetch('https://graphql.anilist.co', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({ query: ANILIST_QUERY, variables: { search: resolvedTerm, type } })
         });
         
+        console.log(`[DEBUG] AniList API response status: ${response.status} ${response.statusText}`);
         if (!response.ok) continue;
         
         const data = await response.json();
         const media = data?.data?.Media;
+        console.log(`[DEBUG] AniList media found: ${media ? media.title?.english || media.title?.romaji : 'null'}`);
+
         
         if (!media || media.isAdult) continue;
         
