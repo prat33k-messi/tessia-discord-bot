@@ -891,7 +891,7 @@ Think step-by-step about what they're really asking. Consider their preferences.
     // Append reasoning context to system prompt if available
     const finalSystemMessage = {
       role: 'system',
-      content: systemPromptContent + reasoningContext + '\n\n[TOOL USAGE RULES: You have access to tools for searching anime/manga data, airing schedules, character info, anime quotes, and web search. Use them when the user asks for specific information. Do NOT fabricate anime data — always use the search_anime_manga tool for specific titles. When a tool returns data, weave it naturally into your response. Do NOT mention tools, APIs, or data sources. Present info as if you personally know it. If a tool returns an image embed, do NOT say you cannot show images.]'
+      content: systemPromptContent + reasoningContext + '\n\n[TOOL USAGE RULES: You have access to tools for fetching real-time data (anime/manga info, schedules, character art, quotes, web searches). Use them when needed. When a tool returns data, weave it naturally into your response as if you personally know it. Do NOT mention tools, APIs, or data sources. If a tool returns an image embed, do NOT say you cannot show images.]'
     };
 
     async function callGroqWithTools(model, messages, tools, temp, tokens) {
@@ -957,10 +957,14 @@ Think step-by-step about what they're really asking. Consider their preferences.
     } catch (primaryError) {
       console.warn(`Primary model (${primaryModel}) failed, falling back to ${fallbackModel}:`, primaryError.message);
       try {
-        // Fallback without tools (simpler, more reliable)
+        // Fallback without tools (simpler, more reliable) using a clean system prompt
+        const fallbackSystemMessage = {
+          role: 'system',
+          content: systemPromptContent + reasoningContext
+        };
         const fallbackCompletion = await groq.chat.completions.create({
           model: fallbackModel,
-          messages: [finalSystemMessage, ...history, systemReminder],
+          messages: [fallbackSystemMessage, ...history, systemReminder],
           temperature: 0.7,
           max_tokens: maxTokens,
         });
