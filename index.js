@@ -2484,26 +2484,54 @@ async function scrapeOpenGraphImage(url) {
 
 // Fetch and parse the Anime News Network RSS feed
 async function fetchAnimeNews() {
+  // Method 1: Use rss2json.com proxy (works from cloud hosting IPs like Render)
+  try {
+    const rssUrl = encodeURIComponent('https://www.animenewsnetwork.com/news/rss.xml');
+    const proxyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`;
+    
+    const response = await fetch(proxyUrl, {
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.status === 'ok' && data.items && data.items.length > 0) {
+        console.log(`[News] Fetched ${data.items.length} articles via rss2json proxy`);
+        return data.items.slice(0, 5).map(item => ({
+          title: item.title || '',
+          link: item.link || '',
+          description: (item.description || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').substring(0, 300),
+          pubDate: item.pubDate || '',
+          category: (item.categories && item.categories.length > 0) ? item.categories[0] : '',
+          imageUrl: item.thumbnail || item.enclosure?.link || null
+        }));
+      }
+    }
+    console.warn('[News] rss2json proxy returned non-ok, trying direct fetch...');
+  } catch (proxyErr) {
+    console.warn('[News] rss2json proxy failed:', proxyErr.message, '— trying direct fetch...');
+  }
+
+  // Method 2: Direct RSS fetch (works locally, may be blocked on cloud hosting)
   try {
     const response = await fetch('https://www.animenewsnetwork.com/news/rss.xml', {
       headers: {
-        'User-Agent': 'TessiaBot/1.0 (Discord Bot)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/xml, text/xml, application/rss+xml'
       }
     });
 
     if (!response.ok) {
-      console.error('ANN RSS fetch failed:', response.status, response.statusText);
+      console.error('[News] Direct ANN RSS fetch failed:', response.status, response.statusText);
       return null;
     }
 
     const xmlText = await response.text();
     const items = parseRSSItems(xmlText);
-
-    // Return top 5 latest items
+    console.log(`[News] Fetched ${items.length} articles via direct RSS`);
     return items.slice(0, 5);
   } catch (err) {
-    console.error('Error fetching ANN RSS feed:', err.message);
+    console.error('[News] All fetch methods failed:', err.message);
     return null;
   }
 }
@@ -2511,8 +2539,11 @@ async function fetchAnimeNews() {
 // Build a beautiful Discord embed for a news article
 async function buildAutoNewsEmbed(article) {
   try {
-    // Scrape the OG image from the article page
-    const imageUrl = await scrapeOpenGraphImage(article.link);
+    // Use pre-fetched image from RSS proxy, or scrape OG image as fallback
+    let imageUrl = article.imageUrl || null;
+    if (!imageUrl && article.link) {
+      imageUrl = await scrapeOpenGraphImage(article.link);
+    }
 
     const embed = new EmbedBuilder()
       .setColor(0xFF6B35) // Warm orange for news
