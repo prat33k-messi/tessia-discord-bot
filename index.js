@@ -112,6 +112,13 @@ client.once('ready', async () => {
       console.error("Error preloading memories from Firestore:", err);
     }
   }
+
+  // --- Feature #33: Start Anime News Auto-Posting Cron ---
+  console.log('[News Cron] Starting anime news auto-posting (every 30 minutes)...');
+  // First check after 10 seconds (let everything initialize)
+  setTimeout(() => checkAndPostNews(), 10000);
+  // Then every 30 minutes
+  setInterval(() => checkAndPostNews(), 30 * 60 * 1000);
 });
 
 client.on('messageCreate', async (message) => {
@@ -287,6 +294,68 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // --- Feature #33: Set News Channel Command ---
+    const setNewsMatch = originalCleanQuery.match(/^set\s+news\s+channel\s+<#(\d+)>/i);
+    if (setNewsMatch) {
+      // Only allow server admins or the bot creator to set the news channel
+      const isAdmin = message.member?.permissions?.has('Administrator') || username === '_c0rle0ne';
+      if (!isAdmin) {
+        await message.reply("Gomen, only server administrators can set the news channel! 🚫🌸");
+        return;
+      }
+      const targetChannelId = setNewsMatch[1];
+      const targetChannel = message.guild?.channels.cache.get(targetChannelId);
+      if (!targetChannel) {
+        await message.reply("I couldn't find that channel! Please mention a valid text channel. 😅");
+        return;
+      }
+      if (db) {
+        try {
+          await db.collection('server_configs').doc(message.guild.id).set({
+            newsChannelId: targetChannelId,
+            newsChannelName: targetChannel.name,
+            updatedBy: username,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          await message.reply(`✅ Anime news will now be posted to <#${targetChannelId}>! I'll check for new articles every 30 minutes. 📰🌸`);
+        } catch (err) {
+          console.error("Error saving news channel config:", err);
+          await message.reply("Something went wrong saving the configuration! Please try again. 😰");
+        }
+      } else {
+        await message.reply("Firebase is not connected, so I can't save channel settings right now! 😰");
+      }
+      return;
+    }
+
+    // --- Feature #33: News Test Command ---
+    if (originalCleanQuery.toLowerCase() === 'news test') {
+      const isAdmin = message.member?.permissions?.has('Administrator') || username === '_c0rle0ne';
+      if (!isAdmin) {
+        await message.reply("Gomen, only server administrators can test the news feed! 🚫🌸");
+        return;
+      }
+      await message.reply("📰 Fetching the latest anime news... One moment! ✨");
+      try {
+        const articles = await fetchAnimeNews();
+        if (!articles || articles.length === 0) {
+          await message.reply("Couldn't fetch any news right now. The RSS feed might be temporarily unavailable! 😅");
+          return;
+        }
+        const latestArticle = articles[0];
+        const embed = await buildAutoNewsEmbed(latestArticle);
+        if (embed) {
+          await message.channel.send({ embeds: [embed] });
+        } else {
+          await message.reply("I fetched the news but couldn't build the embed. Try again shortly! 😰");
+        }
+      } catch (err) {
+        console.error("News test error:", err);
+        await message.reply("Something went wrong while testing the news feed! 😰");
+      }
+      return;
+    }
+
     // Check for a help / features command
     if (originalCleanQuery.toLowerCase() === 'help' || lowerQuery.includes('your features') || lowerQuery.includes('what can you do') || lowerQuery.includes('ur features') || lowerQuery.includes('what do you do')) {
       const helpMessage = `🌸 **Tessia — Your Anipedia Companion** 🌸
@@ -311,6 +380,10 @@ Here's everything I can do!
 • **\`@Tessia character guessing game\`** — I'll pick a character, you guess who it is! 🔍
 • **\`@Tessia anime ranking game\`** — 8 mystery anime in a blind tournament bracket! 🏆
 • **\`@Tessia give me an anime quote\`** — Random anime quotes with beautiful embeds ✨
+
+📰 **Auto News Feed** *(Admin Only)*
+• **\`@Tessia set news channel #channel\`** — Set a channel for automatic anime news updates
+• **\`@Tessia news test\`** — Test post the latest anime news article
 
 🌟 **Server Info**
 • Ask me about **Anipedia** or its features
@@ -2330,6 +2403,232 @@ function buildRankingRevealEmbed(winner, runnerUp) {
   } catch (error) {
     console.error('Error in buildRankingRevealEmbed:', error);
     return null;
+  }
+}
+
+// =====================================================================
+// --- Feature #33: Anime News Auto-Posting System ---
+// =====================================================================
+
+// Lightweight RSS feed parser using regex (no external XML library needed)
+function parseRSSItems(xmlText) {
+  const items = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+  let match;
+
+  while ((match = itemRegex.exec(xmlText)) !== null) {
+    const itemXml = match[1];
+
+    const getTag = (tag) => {
+      const tagMatch = itemXml.match(new RegExp(`<${tag}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, 'i'))
+        || itemXml.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+      return tagMatch ? tagMatch[1].trim() : '';
+    };
+
+    const title = getTag('title');
+    const link = getTag('link');
+    const description = getTag('description');
+    const pubDate = getTag('pubDate');
+    const category = getTag('category');
+
+    if (title && link) {
+      // Clean HTML tags from description
+      const cleanDesc = description.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").substring(0, 300);
+
+      items.push({
+        title,
+        link,
+        description: cleanDesc,
+        pubDate,
+        category,
+        imageUrl: null // Will be populated by OG scraper
+      });
+    }
+  }
+
+  return items;
+}
+
+// Scrape OpenGraph image from an article URL
+async function scrapeOpenGraphImage(url) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+
+    // Try both attribute orderings for og:image meta tag
+    const match1 = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+    if (match1 && match1[1]) return match1[1];
+
+    const match2 = html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+    if (match2 && match2[1]) return match2[1];
+
+    return null;
+  } catch (err) {
+    console.warn('OG image scrape failed for:', url, err.message);
+    return null;
+  }
+}
+
+// Fetch and parse the Anime News Network RSS feed
+async function fetchAnimeNews() {
+  try {
+    const response = await fetch('https://www.animenewsnetwork.com/news/rss.xml', {
+      headers: {
+        'User-Agent': 'TessiaBot/1.0 (Discord Bot)',
+        'Accept': 'application/xml, text/xml, application/rss+xml'
+      }
+    });
+
+    if (!response.ok) {
+      console.error('ANN RSS fetch failed:', response.status, response.statusText);
+      return null;
+    }
+
+    const xmlText = await response.text();
+    const items = parseRSSItems(xmlText);
+
+    // Return top 5 latest items
+    return items.slice(0, 5);
+  } catch (err) {
+    console.error('Error fetching ANN RSS feed:', err.message);
+    return null;
+  }
+}
+
+// Build a beautiful Discord embed for a news article
+async function buildAutoNewsEmbed(article) {
+  try {
+    // Scrape the OG image from the article page
+    const imageUrl = await scrapeOpenGraphImage(article.link);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xFF6B35) // Warm orange for news
+      .setTitle(`📰 ${article.title}`)
+      .setURL(article.link);
+
+    if (article.description && article.description.length > 0) {
+      embed.setDescription(`> ${article.description}${article.description.length >= 297 ? '...' : ''}`);
+    }
+
+    if (imageUrl) {
+      embed.setImage(imageUrl);
+    }
+
+    if (article.category) {
+      embed.addFields({ name: '📁 Category', value: article.category, inline: true });
+    }
+
+    if (article.pubDate) {
+      const date = new Date(article.pubDate);
+      if (!isNaN(date.getTime())) {
+        embed.addFields({ name: '📅 Published', value: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), inline: true });
+      }
+    }
+
+    embed.addFields({ name: '🔗 Read Full Article', value: `[Click here to read on ANN](${article.link})`, inline: false });
+
+    embed.setFooter({ text: 'Anime News Network • Anipedia News Feed 🌸' });
+    embed.setTimestamp();
+
+    return embed;
+  } catch (err) {
+    console.error('Error building news embed:', err.message);
+    return null;
+  }
+}
+
+// Background cron: Check for new articles and post them
+async function checkAndPostNews() {
+  if (!db) return;
+
+  try {
+    // Get all server configs that have a newsChannelId set
+    const configSnapshot = await db.collection('server_configs').get();
+    if (configSnapshot.empty) return;
+
+    // Fetch latest news articles
+    const articles = await fetchAnimeNews();
+    if (!articles || articles.length === 0) {
+      console.log('[News Cron] No articles fetched from ANN RSS feed.');
+      return;
+    }
+
+    console.log(`[News Cron] Fetched ${articles.length} articles. Checking ${configSnapshot.size} server(s)...`);
+
+    for (const configDoc of configSnapshot.docs) {
+      const config = configDoc.data();
+      const guildId = configDoc.id;
+      const newsChannelId = config.newsChannelId;
+
+      if (!newsChannelId) continue;
+
+      try {
+        // Get the channel from Discord
+        const channel = client.channels.cache.get(newsChannelId);
+        if (!channel) {
+          console.warn(`[News Cron] Channel ${newsChannelId} not found for guild ${guildId}`);
+          continue;
+        }
+
+        // Get already-posted URLs for this guild
+        const postedDoc = await db.collection('posted_news').doc(guildId).get();
+        const postedUrls = postedDoc.exists ? (postedDoc.data().urls || []) : [];
+
+        // Find new articles that haven't been posted yet
+        const newArticles = articles.filter(a => !postedUrls.includes(a.link));
+
+        if (newArticles.length === 0) {
+          console.log(`[News Cron] No new articles for guild ${guildId}`);
+          continue;
+        }
+
+        // Post new articles (oldest first so newest appears at bottom)
+        const articlesToPost = newArticles.reverse().slice(0, 3); // Max 3 at a time to avoid spam
+        const newPostedUrls = [];
+
+        for (const article of articlesToPost) {
+          try {
+            const embed = await buildAutoNewsEmbed(article);
+            if (embed) {
+              await channel.send({ embeds: [embed] });
+              newPostedUrls.push(article.link);
+              console.log(`[News Cron] Posted: "${article.title}" to #${channel.name}`);
+
+              // Small delay between posts to avoid rate limiting
+              await new Promise(r => setTimeout(r, 2000));
+            }
+          } catch (postErr) {
+            console.error(`[News Cron] Failed to post article: ${article.title}`, postErr.message);
+          }
+        }
+
+        // Save posted URLs to Firestore (keep last 100 to prevent unbounded growth)
+        if (newPostedUrls.length > 0) {
+          const allUrls = [...postedUrls, ...newPostedUrls].slice(-100);
+          await db.collection('posted_news').doc(guildId).set({ urls: allUrls, lastUpdated: new Date().toISOString() });
+        }
+
+      } catch (guildErr) {
+        console.error(`[News Cron] Error processing guild ${guildId}:`, guildErr.message);
+      }
+    }
+
+    console.log('[News Cron] Cycle complete.');
+  } catch (err) {
+    console.error('[News Cron] Fatal error:', err.message);
   }
 }
 
