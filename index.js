@@ -79,6 +79,9 @@ const activeGames = new Map(); // Map username -> { character, hints, guessCount
 // --- NEW FEATURE: Blind Anime Ranking Game (#30) ---
 const activeRankingGames = new Map(); // Map username -> { anime[], bracket[], round, match, winner }
 
+// --- NEW FEATURE: AFK System (#34) ---
+const afkUsers = new Map(); // Map username -> { reason, timestamp, nickname }
+
 // --- Feature #31: Intent detection via keyword pre-check + LLM classifier (no native tool calling) ---
 
 // --- NEW FEATURE: NSFW/Inappropriate Content Filter (#7) ---
@@ -113,6 +116,20 @@ client.once('ready', async () => {
     }
   }
 
+  // Feature #34: Preload AFK statuses from Firestore on startup
+  if (db) {
+    try {
+      const afkSnapshot = await db.collection('afk_status').get();
+      afkSnapshot.forEach(doc => {
+        const data = doc.data();
+        afkUsers.set(doc.id, { reason: data.reason, timestamp: data.timestamp, nickname: data.nickname });
+      });
+      if (afkUsers.size > 0) console.log(`Preloaded ${afkUsers.size} AFK user(s) from Firestore.`);
+    } catch (err) {
+      console.error("Error preloading AFK statuses:", err);
+    }
+  }
+
   // --- Feature #33: Start Anime News Auto-Posting Cron ---
   console.log('[News Cron] Starting anime news auto-posting (every 30 minutes)...');
   // First check after 10 seconds (let everything initialize)
@@ -124,6 +141,41 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
+
+  // --- Feature #34: AFK Return Detection (runs on ALL messages, before mention check) ---
+  const msgAuthor = message.author.username;
+  if (afkUsers.has(msgAuthor)) {
+    const afkData = afkUsers.get(msgAuthor);
+    const duration = formatDuration(Date.now() - afkData.timestamp);
+    const nickname = message.member?.displayName || message.author.displayName || msgAuthor;
+    afkUsers.delete(msgAuthor);
+    // Also remove from Firestore
+    if (db) {
+      db.collection('afk_status').doc(msgAuthor).delete().catch(err => console.error('Error deleting AFK from Firestore:', err));
+    }
+    const welcomeEmbed = new EmbedBuilder()
+      .setColor(0x57F287) // Green for welcome back
+      .setTitle('🎉 Welcome Back!')
+      .setDescription(`Welcome back, **${nickname}**! You were away for **${duration}**.`)
+      .setFooter({ text: 'Missed you! 🌸' })
+      .setTimestamp();
+    try {
+      await message.channel.send({ embeds: [welcomeEmbed] });
+    } catch (e) { console.error('AFK welcome back error:', e.message); }
+  }
+
+  // --- Feature #34: Notify when someone mentions an AFK user ---
+  if (message.mentions.users.size > 0) {
+    for (const [mentionedId, mentionedUser] of message.mentions.users) {
+      if (afkUsers.has(mentionedUser.username)) {
+        const afkData = afkUsers.get(mentionedUser.username);
+        const ago = formatDuration(Date.now() - afkData.timestamp);
+        try {
+          await message.reply(`💤 **${afkData.nickname || mentionedUser.username}** is currently AFK: *${afkData.reason}* (since ${ago} ago)`);
+        } catch (e) { /* ignore */ }
+      }
+    }
+  }
 
   // Check if bot was mentioned
   const botMention = `<@${client.user.id}>`;
@@ -294,6 +346,25 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // --- Feature #34: AFK Command ---
+    const afkMatch = originalCleanQuery.match(/^afk(?:\s+(.+))?$/i);
+    if (afkMatch) {
+      const reason = afkMatch[1]?.trim() || 'No reason given';
+      afkUsers.set(username, { reason, timestamp: Date.now(), nickname });
+      // Persist to Firestore
+      if (db) {
+        db.collection('afk_status').doc(username).set({ reason, timestamp: Date.now(), nickname }).catch(err => console.error('Error saving AFK to Firestore:', err));
+      }
+      const afkEmbed = new EmbedBuilder()
+        .setColor(0xFEE75C) // Yellow for AFK
+        .setTitle('💤 AFK Set')
+        .setDescription(`**${nickname}** is now AFK\n**Reason:** ${reason}`)
+        .setFooter({ text: "I'll let everyone know! 🌸" })
+        .setTimestamp();
+      await message.reply({ embeds: [afkEmbed] });
+      return;
+    }
+
     // --- Feature #33: Set News Channel Command ---
     const setNewsMatch = originalCleanQuery.match(/^set\s+news\s+channel\s+<#(\d+)>/i);
     if (setNewsMatch) {
@@ -384,6 +455,13 @@ Here's everything I can do!
 📰 **Auto News Feed** *(Admin Only)*
 • **\`@Tessia set news channel #channel\`** — Set a channel for automatic anime news updates
 • **\`@Tessia news test\`** — Test post the latest anime news article
+
+💤 **AFK System**
+• **\`@Tessia afk <reason>\`** — Set yourself as AFK with a reason
+• When you come back, I'll welcome you and show how long you were away! 🎉
+
+🔍 **Web Search**
+• Ask me any factual question — I'll search the web for you! 🌐
 
 🌟 **Server Info**
 • Ask me about **Anipedia** or its features
@@ -973,6 +1051,12 @@ Think step-by-step about what they're really asking. Consider their preferences.
       // Anime quote patterns
       if (!detectedIntent && (lq.includes('anime quote') || lq.includes('random quote') || lq.includes('give me a quote') || lq === 'quote')) {
         detectedIntent = 'anime_quote';
+      }
+
+      // Web search patterns (factual questions, current events, general knowledge)
+      if (!detectedIntent && detectWebSearchQuery(cleanQuery)) {
+        detectedIntent = 'web_search';
+        detectedTerm = cleanQuery;
       }
 
       // Step 1: If keyword pre-check didn't match, use the LLM classifier as fallback
@@ -1747,36 +1831,67 @@ function buildAniListEmbed(data) {
   return embed;
 }
 
-// --- Feature #16: Brave Web Search ---
-async function searchBrave(query) {
-  const apiKey = process.env.BRAVE_API_KEY;
-  if (!apiKey) return null;
-
+// --- Feature #16: Web Search Engine (Wikipedia primary + Brave fallback) ---
+async function searchWeb(query) {
+  // Method 1: Wikipedia API (always free, no API key, reliable)
   try {
-    const response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&safesearch=strict`, {
-      headers: {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip',
-        'X-Subscription-Token': apiKey
+    const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`;
+    const wikiResp = await fetch(wikiUrl);
+    if (wikiResp.ok) {
+      const wikiData = await wikiResp.json();
+      const wikiResults = wikiData.query?.search || [];
+      if (wikiResults.length > 0) {
+        const context = wikiResults.map(r => {
+          const snippet = r.snippet.replace(/<[^>]*>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#039;/g, "'");
+          return `• ${r.title}: ${snippet}`;
+        }).join('\n');
+        console.log(`[WebSearch] Wikipedia returned ${wikiResults.length} results for: ${query}`);
+        return context;
       }
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const results = data.web?.results?.slice(0, 5) || [];
-
-    if (results.length === 0) return null;
-
-    let context = '';
-    for (const r of results) {
-      context += `• ${r.title}: ${r.description || ''}\n`;
     }
-    return context;
   } catch (err) {
-    console.error('Brave search error:', err.message);
-    return null;
+    console.warn('[WebSearch] Wikipedia API failed:', err.message);
   }
+
+  // Method 2: Brave Search (if API key is configured)
+  const braveKey = process.env.BRAVE_API_KEY;
+  if (braveKey) {
+    try {
+      const response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&safesearch=strict`, {
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Encoding': 'gzip',
+          'X-Subscription-Token': braveKey
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const results = data.web?.results?.slice(0, 5) || [];
+        if (results.length > 0) {
+          console.log(`[WebSearch] Brave returned ${results.length} results for: ${query}`);
+          return results.map(r => `• ${r.title}: ${r.description || ''}`).join('\n');
+        }
+      }
+    } catch (err) {
+      console.warn('[WebSearch] Brave search failed:', err.message);
+    }
+  }
+
+  console.log(`[WebSearch] No results found for: ${query}`);
+  return null;
+}
+
+// --- Feature #34: Format duration helper ---
+function formatDuration(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
 }
 
 // Detect if a message needs web search (general knowledge, current events, non-anime specific)
@@ -2246,7 +2361,7 @@ async function executeToolCall(toolName, args, username) {
       return quote; // { quote, character, anime }
     }
     case 'web_search': {
-      const results = await searchBrave(args.query);
+      const results = await searchWeb(args.query);
       return results || 'No web search results found.';
     }
     default:
