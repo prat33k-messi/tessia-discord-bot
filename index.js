@@ -1204,12 +1204,55 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
     }
 
     // Fail-safe: strip any leaked <function=...> XML tags from the bot response
+    botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
+
+    // --- Feature #34b: Smart Web Search Fallback ---
+    // If Tessia's response sounds uncertain AND we didn't already do a web search, auto-search and regenerate
+    if (!toolContext.includes('[WEB SEARCH RESULTS') && !toolContext.includes('[VERIFIED ANIME')) {
+      const uncertainPhrases = [
+        "i'm not sure", "i don't know", "i'm not certain", "i don't have",
+        "i cannot provide", "i can't provide", "don't have access", "not aware of",
+        "i'm unable", "i am not sure", "i am not certain", "don't have information",
+        "not have real-time", "my knowledge", "my training", "as of my",
+        "i lack", "beyond my", "outside my", "i wouldn't know"
+      ];
+      const lowerResponse = botResponse.toLowerCase();
+      const soundsUncertain = uncertainPhrases.some(phrase => lowerResponse.includes(phrase));
+      const isQuestionLike = cleanQuery.endsWith('?') || detectWebSearchQuery(cleanQuery);
+
+      if (soundsUncertain && isQuestionLike) {
+        console.log(`[WebSearch Fallback] Tessia sounded uncertain, auto-searching for: ${cleanQuery}`);
+        try {
+          const searchResults = await searchWeb(cleanQuery);
+          if (searchResults) {
+            const searchContext = `\n\n[WEB SEARCH RESULTS - You previously said you didn't know, but here are real search results. Use them to give an accurate, confident answer. Do NOT say you don't know or can't access info. Present the data naturally as Tessia.]\n${searchResults}`;
+            const retryCompletion = await groq.chat.completions.create({
+              model: primaryModel,
+              messages: [
+                { role: 'system', content: systemPromptContent + reasoningContext + searchContext },
+                ...history,
+                systemReminder
+              ],
+              temperature: 0.7,
+              max_tokens: maxTokens,
+              stop: ["<function", "</function"]
+            });
+            const retryResponse = retryCompletion.choices[0]?.message?.content;
+            if (retryResponse && retryResponse.length > 20) {
+              botResponse = retryResponse;
+              console.log('[WebSearch Fallback] Successfully regenerated response with search data');
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn('[WebSearch Fallback] Failed:', fallbackErr.message);
+        }
+      }
+    }
+
+    // Fail-safe: strip leaked function tags
     botResponse = botResponse.replace(/<function=[^>]*>[^<]*<\/function>/g, '').trim();
     botResponse = botResponse.replace(/<function=[^>]*\/>/g, '').trim();
-    // Also strip any partial function tags that might appear
     botResponse = botResponse.replace(/<\/?function[^>]*>/g, '').trim();
-
-    // Fail-safe global replace to ensure Aerion-sama's Discord username never leaks in Tessia's replies
     botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
 
     // --- Feature #19: Anipedia Description Check/Append ---
@@ -1898,24 +1941,40 @@ function formatDuration(ms) {
 function detectWebSearchQuery(query) {
   const lq = query.toLowerCase().trim();
 
-  // Skip very short messages or casual chat
-  if (lq.split(/\s+/).length < 3) return null;
+  // Skip very short messages (1-2 words) unless they end with ?
+  if (lq.split(/\s+/).length < 2 && !lq.endsWith('?')) return null;
 
-  // Patterns that strongly suggest the user wants factual/current info
-  const searchPatterns = [
-    /(?:what\s+is|what\s+are|who\s+is|who\s+are|when\s+(?:is|was|did|will)|where\s+(?:is|are|was)|how\s+(?:to|do|does|did|many|much|long|old))\s+(.+)/i,
-    /(?:latest|recent|new|current|upcoming|news\s+(?:about|on))\s+(.+)/i,
-    /(?:tell\s+me\s+about|explain|define|meaning\s+of)\s+(.+)/i,
-    /(?:why\s+(?:is|are|do|does|did))\s+(.+)/i,
-    /(?:price|cost|release\s+date|schedule)\s+(?:of|for)\s+(.+)/i,
+  // Skip obvious casual chat / greetings / bot commands
+  const casualWords = ['hello', 'hi', 'hey', 'yo', 'thanks', 'ok', 'okay', 'yes', 'no', 'bye', 'reset', 'ping', 'help', 'profile', 'afk', 'lol', 'lmao', 'haha', 'bruh', 'nice', 'cool', 'good morning', 'good night', 'gm', 'gn'];
+  if (casualWords.includes(lq.replace(/[?!.]+$/, '').trim())) return null;
+
+  // Pattern 1: Direct question words — strongest signal
+  const questionPatterns = [
+    /^(?:what|who|when|where|why|how|which|is|are|was|were|do|does|did|can|could|will|would|should)\s+.{3,}/i,
   ];
+  for (const p of questionPatterns) {
+    if (p.test(lq)) return query;
+  }
 
-  for (const pattern of searchPatterns) {
-    const match = lq.match(pattern);
-    if (match && match[1]) {
-      const topic = match[1].replace(/[?!.]+$/, '').trim();
-      if (topic.length >= 3) return query; // Return the full query for better search results
-    }
+  // Pattern 2: Any message ending with ? that's 3+ words
+  if (lq.endsWith('?') && lq.split(/\s+/).length >= 3) return query;
+
+  // Pattern 3: Explicit info-seeking phrases
+  const infoPatterns = [
+    /(?:tell\s+me\s+about|explain|define|meaning\s+of|search\s+for|look\s+up|find\s+(?:out|me)|google)\s+(.+)/i,
+    /(?:latest|recent|new|current|upcoming|breaking)\s+(?:news|update|info|release|announcement)/i,
+    /(?:news|update|info|information)\s+(?:about|on|for|regarding)\s+(.+)/i,
+    /(?:price|cost|release\s+date|schedule|salary|worth|height|age|birthday)\s+(?:of|for)\s+(.+)/i,
+    /(?:difference\s+between|compare|vs|versus)\s+(.+)/i,
+    /(?:how\s+(?:to|do|does|did|many|much|long|old|tall|far))\s+(.+)/i,
+  ];
+  for (const p of infoPatterns) {
+    if (p.test(lq)) return query;
+  }
+
+  // Pattern 4: Topic + "news" or "update" anywhere
+  if (/(?:news|update|latest|release|announcement|trailer|season \d)/.test(lq) && lq.split(/\s+/).length >= 3) {
+    return query;
   }
 
   return null;
