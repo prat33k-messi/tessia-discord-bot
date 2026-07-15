@@ -2217,7 +2217,55 @@ async function getAnimeNews(animeName) {
   try {
     const cleanedAnimeName = cleanAnimeTerm(animeName);
     console.log(`[DEBUG] getAnimeNews called: animeName="${animeName}", cleaned="${cleanedAnimeName}"`);
-    // Step 1: Search for the anime on Jikan to get MAL ID
+
+    // --- Primary: Use ANN RSS feed (PROVEN to work on Render via rss2json proxy) ---
+    try {
+      const rssArticles = await fetchAnimeNews();
+      if (rssArticles && rssArticles.length > 0) {
+        console.log(`[News] Got ${rssArticles.length} RSS articles, filtering for "${cleanedAnimeName}"...`);
+        
+        // If a specific anime was requested, filter articles by name
+        let matchedArticles = rssArticles;
+        const searchTerms = cleanedAnimeName.toLowerCase().split(/\s+/);
+        
+        if (cleanedAnimeName && cleanedAnimeName.toLowerCase() !== 'anime' && cleanedAnimeName.toLowerCase() !== 'anime news') {
+          matchedArticles = rssArticles.filter(a => {
+            const titleLower = (a.title || '').toLowerCase();
+            const descLower = (a.description || '').toLowerCase();
+            // Match if ANY of the search terms appear in title or description
+            return searchTerms.some(term => term.length > 2 && (titleLower.includes(term) || descLower.includes(term)));
+          });
+        }
+
+        // If specific anime had no matches, return ALL recent news as general anime news
+        const articlesToReturn = matchedArticles.length > 0 ? matchedArticles : rssArticles;
+        const isFiltered = matchedArticles.length > 0 && cleanedAnimeName.toLowerCase() !== 'anime';
+
+        const topArticles = articlesToReturn.slice(0, 5).map(a => {
+          const dateStr = a.pubDate ? new Date(a.pubDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Recent';
+          return {
+            title: a.title || 'Untitled',
+            url: a.link || '',
+            date: dateStr,
+            excerpt: (a.description || '').substring(0, 150),
+            authorUsername: 'Anime News Network',
+            forumUrl: ''
+          };
+        });
+
+        console.log(`[News] Returning ${topArticles.length} articles (filtered=${isFiltered}, query="${cleanedAnimeName}")`);
+        return {
+          animeName: isFiltered ? cleanedAnimeName : 'Anime',
+          malId: null,
+          articles: topArticles,
+          coverImage: null
+        };
+      }
+    } catch (rssErr) {
+      console.warn('[News] RSS fetch failed, trying Jikan fallback:', rssErr.message);
+    }
+
+    // --- Fallback: Jikan MAL API ---
     const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(cleanedAnimeName)}&limit=1&sfw=true`;
     const searchResponse = await fetch(searchUrl, {
       headers: { 'Accept': 'application/json' }
@@ -2237,10 +2285,8 @@ async function getAnimeNews(animeName) {
     const resolvedName = anime.title_english || anime.title || animeName;
     const coverImage = anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || null;
 
-    // Jikan requires 1 second between requests to avoid rate limiting
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Step 2: Fetch news for this anime
     const newsUrl = `https://api.jikan.moe/v4/anime/${malId}/news`;
     const newsResponse = await fetch(newsUrl, {
       headers: { 'Accept': 'application/json' }
@@ -2257,11 +2303,9 @@ async function getAnimeNews(animeName) {
 
     if (articles.length === 0) return { animeName: resolvedName, articles: [], coverImage };
 
-    // Take top 5 latest news articles
     const topArticles = articles.slice(0, 5).map(article => {
       const dateStr = article.date ? new Date(article.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Unknown date';
       let excerpt = article.excerpt || article.comments_count ? `${article.comments_count || 0} comments` : '';
-      // Clean HTML from excerpt
       excerpt = excerpt.replace(/<[^>]*>/g, '').substring(0, 150);
 
       return {
@@ -2290,8 +2334,9 @@ async function getAnimeNews(animeName) {
 function buildAnimeNewsEmbed(data) {
   const embed = new EmbedBuilder()
     .setColor(0x2E51A2) // MyAnimeList blue
-    .setTitle(`📰 Latest News: ${data.animeName}`)
-    .setURL(`https://myanimelist.net/anime/${data.malId}`);
+    .setTitle(`📰 Latest News: ${data.animeName}`);
+
+  if (data.malId) embed.setURL(`https://myanimelist.net/anime/${data.malId}`);
 
   if (data.coverImage) embed.setThumbnail(data.coverImage);
 
