@@ -597,6 +597,7 @@ ${isDetailedQuestion ? '- This is a detailed question, so you may extend up to 6
 - When mentioning Discord channels, do NOT wrap them in "<>" (e.g. do NOT output "<#general-chat>"). Always output them simply starting with '#' (e.g. "#・general-chat", "#・media-share", "#・owo", "#・art", "#・manga-pannels").
 - Make use of beautiful Discord formatting (bolding, bullet points, quote blocks) to structure your text nicely.
 - You are an expert in all things Anime, Manga, Light Novels, and Gaming.
+- WEB SEARCH CAPABILITY: You have the ability to search the web. When web search results are provided in your context (marked with [CRITICAL INSTRUCTION] or [WEB SEARCH RESULTS]), you MUST use that data to answer ANY question—even if it's not anime-related (e.g., science, history, current events, real-world facts). NEVER refuse to answer or say "I don't know" when search data is available. Present the facts naturally in your Tessia personality.
 - If he asks you to clear memory, tell him he can type '@Tessia reset'.
 
 Conversational Dynamics & Flow:
@@ -641,6 +642,7 @@ ${isDetailedQuestion ? '- This is a detailed question, so you may extend up to 6
 - When mentioning Discord channels, do NOT wrap them in "<>" (e.g. do NOT output "<#general-chat>"). Always output them simply starting with '#' (e.g. "#・general-chat", "#・media-share", "#・owo", "#・art", "#・manga-pannels").
 - Make use of beautiful Discord formatting (bolding, bullet points, quote blocks) to structure your text nicely.
 - You are an expert in all things Anime, Manga, Light Novels, and Gaming.
+- WEB SEARCH CAPABILITY: You have the ability to search the web. When web search results are provided in your context (marked with [CRITICAL INSTRUCTION] or [WEB SEARCH RESULTS]), you MUST use that data to answer ANY question—even if it's not anime-related (e.g., science, history, current events, real-world facts). NEVER refuse to answer or say "I don't know" when search data is available. Present the facts naturally in your Tessia personality.
 - If they ask you to clear memory, tell them they can type '@Tessia reset'.
 
 Conversational Dynamics & Flow:
@@ -1154,7 +1156,7 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
               console.log(`[News Fallback] No Jikan news for "${detectedTerm}", trying web search...`);
               const webNewsResults = await searchWeb(`${detectedTerm} anime news latest updates`);
               if (webNewsResults) {
-                toolContext = `\n\n[WEB SEARCH RESULTS for anime news about "${detectedTerm}" — The anime news API had no results, but web search found these. Present them naturally as recent news/updates.]\n${webNewsResults}`;
+                toolContext = `\n\n[CRITICAL INSTRUCTION: The anime news API returned nothing, but web search found real results below. You MUST use this data to answer. Present the information as recent news/updates you found. NEVER say you "couldn't find" anything — you DID find info. Be helpful and informative.]\n${webNewsResults}`;
               } else {
                 toolContext = `\n\n[No recent news articles were found for this anime from any source. Tell the user honestly that there aren't any recent news updates available right now, and suggest checking official sources or asking again later.]`;
               }
@@ -1174,7 +1176,7 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
           } else if (toolName === 'get_airing_schedule') {
             toolContext = `\n\n[REAL AIRING SCHEDULE DATA FOR TODAY - Use this verified data to answer. Present it naturally.]\n${toolResult}`;
           } else if (toolName === 'web_search') {
-            toolContext = `\n\n[WEB SEARCH RESULTS - Use these real search results to give an accurate, informed answer. Present info naturally.]\n${toolResult}`;
+            toolContext = `\n\n[CRITICAL INSTRUCTION: You searched the web and found real data below. You MUST use this data to give an accurate, informed answer. Do NOT refuse to answer. Do NOT say "I don't know" or "I'm not sure" or "I can't help with that". Even if the topic is not anime-related, you MUST answer using the search results. Present the facts naturally while staying in your Tessia personality.]\n${toolResult}`;
           }
         }
       }
@@ -1237,14 +1239,13 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
       ];
       const lowerResponse = botResponse.toLowerCase();
       const soundsUncertain = uncertainPhrases.some(phrase => lowerResponse.includes(phrase));
-      const isQuestionLike = cleanQuery.endsWith('?') || detectWebSearchQuery(cleanQuery);
 
-      if (soundsUncertain && isQuestionLike) {
+      if (soundsUncertain) {
         console.log(`[WebSearch Fallback] Tessia sounded uncertain, auto-searching for: ${cleanQuery}`);
         try {
           const searchResults = await searchWeb(cleanQuery);
           if (searchResults) {
-            const searchContext = `\n\n[WEB SEARCH RESULTS - You previously said you didn't know, but here are real search results. Use them to give an accurate, confident answer. Do NOT say you don't know or can't access info. Present the data naturally as Tessia.]\n${searchResults}`;
+            const searchContext = `\n\n[CRITICAL INSTRUCTION: Your previous response was uncertain/unhelpful. Here are REAL web search results. You MUST now give an accurate, confident answer using this data. NEVER say "I don't know", "I'm not sure", "I can't help", or suggest checking other sources. YOU are the source — use the data below. Stay in your Tessia personality but answer the question fully.]\n${searchResults}`;
             const retryCompletion = await groq.chat.completions.create({
               model: primaryModel,
               messages: [
