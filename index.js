@@ -1036,6 +1036,15 @@ Think step-by-step about what they're really asking. Consider their preferences.
         for (const pattern of charPatterns) {
           const match = cleanQuery.match(pattern);
           if (match && match[1] && match[1].trim().length > 1) {
+            const candidateName = match[1].trim().toLowerCase();
+            // Skip if the name contains real-world context words (not an anime character)
+            const realWorldWords = ['president', 'prime minister', 'minister', 'ceo', 'founder', 'king of', 'queen of', 'leader of', 'capital of', 'population', 'country', 'city of', 'inventor', 'richest', 'tallest', 'oldest', 'owner of'];
+            if (realWorldWords.some(w => candidateName.includes(w))) {
+              // This is a real-world question, not an anime character — route to web search
+              detectedIntent = 'web_search';
+              detectedTerm = cleanQuery;
+              break;
+            }
             detectedIntent = 'character_search';
             detectedTerm = match[1].trim();
             break;
@@ -1141,7 +1150,14 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
             } else if (toolResult?.rateLimited) {
               toolContext = `\n\n[The news service is temporarily busy. Tell the user: "I couldn't fetch the latest news right now, could you ask me again in a moment? 🌸" Do NOT make up any news.]`;
             } else {
-              toolContext = `\n\n[No recent news articles were found for this anime. Tell the user honestly that there aren't any recent news updates available right now, and suggest checking official sources or asking again later.]`;
+              // No anime news found — try web search as fallback
+              console.log(`[News Fallback] No Jikan news for "${detectedTerm}", trying web search...`);
+              const webNewsResults = await searchWeb(`${detectedTerm} anime news latest updates`);
+              if (webNewsResults) {
+                toolContext = `\n\n[WEB SEARCH RESULTS for anime news about "${detectedTerm}" — The anime news API had no results, but web search found these. Present them naturally as recent news/updates.]\n${webNewsResults}`;
+              } else {
+                toolContext = `\n\n[No recent news articles were found for this anime from any source. Tell the user honestly that there aren't any recent news updates available right now, and suggest checking official sources or asking again later.]`;
+              }
             }
           } else if (toolName === 'search_character') {
             if (toolResult && !toolResult.rateLimited) {
@@ -1214,7 +1230,10 @@ For casual_chat, omit term: {"intent": "casual_chat"}`
         "i cannot provide", "i can't provide", "don't have access", "not aware of",
         "i'm unable", "i am not sure", "i am not certain", "don't have information",
         "not have real-time", "my knowledge", "my training", "as of my",
-        "i lack", "beyond my", "outside my", "i wouldn't know"
+        "i lack", "beyond my", "outside my", "i wouldn't know",
+        "couldn't find", "could not find", "unable to find", "no recent news",
+        "no news updates", "not available right now", "i don't currently",
+        "unfortunately", "i'm afraid", "i apologize but", "suggest checking"
       ];
       const lowerResponse = botResponse.toLowerCase();
       const soundsUncertain = uncertainPhrases.some(phrase => lowerResponse.includes(phrase));
