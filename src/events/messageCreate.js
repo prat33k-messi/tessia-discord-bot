@@ -4,7 +4,7 @@ const { formatDuration, cleanAnimeTerm, cleanCharacterTerm, splitMessage, detect
 const { searchAniList, buildAniListEmbed, getAiringSchedule, searchAniListCharacter, buildCharacterEmbed, getAnimeQuote, buildQuoteEmbed } = require('../services/anilist');
 const { getAnimeNews, buildAnimeNewsEmbed, fetchAnimeNews } = require('../services/news');
 const { searchWeb } = require('../services/search');
-const { extractAndStoreFacts, sendAlertToCreator, saveConversationSummary } = require('../services/llm');
+const { extractAndStoreFacts, sendAlertToCreator, saveConversationSummary, evaluateResponse } = require('../services/llm');
 const { groq } = require('../config');
 
 const COOLDOWN_MS = 3000;
@@ -826,6 +826,35 @@ Think step-by-step about what they're really asking. Consider their preferences.
             console.warn('[WebSearch Fallback] Failed:', fallbackErr.message);
           }
         }
+      }
+
+      // --- Feature #35: Self-Evaluation Quality Control ---
+      try {
+        const evalResult = await evaluateResponse(botResponse, cleanQuery);
+        if (evalResult.score < 9) {
+          console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
+          const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
+
+          const correctionCompletion = await groq.chat.completions.create({
+            model: primaryModel,
+            messages: [
+              { role: 'system', content: systemPromptContent + reasoningContext + toolContext + selfCorrectionContext },
+              ...history,
+              systemReminder
+            ],
+            temperature: 0.7,
+            max_tokens: calculatedMaxTokens,
+            stop: ["<function", "</function"]
+          });
+
+          const correctedResponse = correctionCompletion.choices[0]?.message?.content;
+          if (correctedResponse && correctedResponse.length > 10) {
+            botResponse = correctedResponse;
+            console.log('[Self-Evaluation] Successfully regenerated response using self-correction feedback');
+          }
+        }
+      } catch (evalErr) {
+        console.warn('[Self-Evaluation] Ignored error:', evalErr.message);
       }
 
       // Cleanup function tags

@@ -113,8 +113,49 @@ async function saveConversationSummary(username, history) {
   }
 }
 
+async function evaluateResponse(response, userQuery) {
+  try {
+    const evaluationPrompt = `You are a strict quality control model for a Tessia Eralith (from TBATE) Discord bot.
+Evaluate the bot's proposed response to a user query and assign a quality score from 1 to 10 (where 9 or 10 is ready to send).
+
+Proposed response: "${response}"
+User query: "${userQuery}"
+
+Evaluation Criteria:
+1. Persona: Does it sound like Tessia Eralith (warm, spirited, slightly proud yet caring elven girl)?
+2. Helpfulness: Does it directly address the user's query with high-quality, accurate details?
+3. Rule Compliance:
+   - Does it avoid mentioning the developer username "_c0rle0ne" (should refer only to "Aerion-sama")?
+   - Does it avoid wrapping Discord channels in "<>" (must be #channel format)?
+   - Does it speak in English only?
+   - Does it avoid revealing crucial anime/manga spoilers?
+
+Output strictly as a JSON object:
+{
+  "score": <number 1-10>,
+  "reason": "Explain any deficiencies or why it is great",
+  "improvements": "Specific generic instructions to improve the response (e.g. make it more warm/spirited, correct formatting, add detail, keep it under 4 lines, etc.)"
+}`;
+
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'user', content: evaluationPrompt }],
+      temperature: 0.1,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(completion.choices[0]?.message?.content || '{"score": 10, "reason": "No evaluation", "improvements": ""}');
+    console.log(`[Self-Evaluation] Proposed response scored ${result.score}/10. Reason: ${result.reason}`);
+    return result;
+  } catch (err) {
+    console.error("Self-evaluation failed:", err);
+    return { score: 10, reason: "Evaluation failed, default to bypass", improvements: "" };
+  }
+}
+
 module.exports = {
   extractAndStoreFacts,
   sendAlertToCreator,
-  saveConversationSummary
+  saveConversationSummary,
+  evaluateResponse
 };
