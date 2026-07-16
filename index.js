@@ -32,6 +32,7 @@ client.commands = new Collection();
 client.afkUsers = new Map();
 client.activeGames = new Map();
 client.activeRankingGames = new Map();
+client.activePromptSessions = new Map();
 client.preloadedMemories = new Map();
 client.userCooldowns = new Map();
 client.lastResponseOpeners = new Map();

@@ -342,6 +342,48 @@ module.exports = {
         }
       }
 
+      // Prompt builder session match
+      if (client.activePromptSessions.has(username)) {
+        const session = client.activePromptSessions.get(username);
+        const lg = lowerQuery.trim();
+
+        if (lg === 'exit' || lg === 'quit' || lg === 'stop' || lg === 'cancel') {
+          client.activePromptSessions.delete(username);
+          await message.reply("❌ Prompt building session closed. Feel free to start a new one anytime! 🌸");
+          return;
+        }
+
+        // Generate refined prompt
+        await message.channel.sendTyping();
+        const { generatePromptDraft } = require('../commands/general/prompt-builder');
+        const nextDraft = await generatePromptDraft(session.task, cleanQuery, session.currentPrompt);
+        
+        if (nextDraft) {
+          session.currentPrompt = nextDraft;
+          
+          const embed = new EmbedBuilder()
+            .setColor(0x9B59B6)
+            .setTitle('📝 Tessia Prompt Builder (Refined)')
+            .setDescription(
+              `Here is your updated prompt template! 🌸\n` +
+              `You can answer the new questions, suggest more changes, or type \`exit\` to finish.`
+            )
+            .setTimestamp();
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId('prompt_exit')
+              .setLabel('Exit Prompt Builder')
+              .setStyle(ButtonStyle.Danger)
+          );
+
+          await message.reply({ content: nextDraft, embeds: [embed], components: [row] });
+        } else {
+          await message.reply("Something went wrong while refining the prompt, please try again! 😰");
+        }
+        return;
+      }
+
       // Check if user is starting character guessing game
       const gameKeywords = ['character guessing game', 'guess the character', 'anime guessing game', 'character game', 'guessing game', 'play a game'];
       if (gameKeywords.some(k => lowerQuery.includes(k))) {
@@ -354,6 +396,16 @@ module.exports = {
       if (rankingStartKeywords.some(k => lowerQuery.includes(k))) {
         const cmd = client.commands.get('blind-ranking');
         if (cmd) return cmd.executeMessage(message);
+      }
+
+      // Check if user is starting prompt builder
+      const promptKeywords = ['prompt-builder', 'build prompt', 'create prompt', 'prompt builder'];
+      if (promptKeywords.some(k => lowerQuery.includes(k))) {
+        const cmd = client.commands.get('prompt-builder');
+        if (cmd) {
+          const args = originalCleanQuery.split(/\s+/).slice(2);
+          return cmd.executeMessage(message, args);
+        }
       }
 
       // --- 8. Regular Chat and Search Router ---

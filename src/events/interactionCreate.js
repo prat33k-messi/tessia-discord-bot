@@ -111,6 +111,17 @@ module.exports = {
         return;
       }
 
+      // prompt-builder exit button
+      if (interaction.customId === 'prompt_exit') {
+        const session = interaction.client.activePromptSessions.get(username);
+        if (!session) {
+          return interaction.reply({ content: "You don't have an active prompt session running! 🌸", ephemeral: true });
+        }
+        interaction.client.activePromptSessions.delete(username);
+        await interaction.update({ content: `❌ Prompt building session closed. Here is your final prompt:\n\n${session.currentPrompt}`, embeds: [], components: [] });
+        return;
+      }
+
       // blind-ranking buttons
       if (interaction.customId === 'rank_vote_a' || interaction.customId === 'rank_vote_b' || interaction.customId === 'rank_cancel') {
         const rankingGame = interaction.client.activeRankingGames.get(username);
