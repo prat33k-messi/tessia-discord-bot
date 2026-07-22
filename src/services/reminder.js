@@ -6,8 +6,8 @@ const { formatDuration } = require('../utils/helpers');
 function parseReminderInput(input) {
   let text = input.trim();
 
-  // Regex to match duration components like "1d", "2 hours", "10 mins", "30s", "in 5 minutes"
-  const timeRegex = /\b(?:in\s+)?(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi;
+  // Regex to match duration components like "1d", "2 hours", "10 mins", "30s", "in/after 5 minutes"
+  const timeRegex = /\b(?:(?:in|after)\s+)?(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi;
 
   let totalMs = 0;
   let matches = [];
@@ -44,7 +44,7 @@ function parseReminderInput(input) {
     .replace(/^tessia\s+/gi, '')
     .replace(/\b(?:set\s+)?(?:reminder|remainder)\b/gi, '')
     .replace(/\bremind\s+(?:me\s+)?(?:to\s+)?/gi, '')
-    .replace(/\b(?:in|at|for|to)\b/gi, ' ')
+    .replace(/\b(?:in|after|at|for|to)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -190,9 +190,39 @@ async function initReminderService(client) {
   }, 10000);
 }
 
+// Get all active reminders for a specific user
+function getUserReminders(client, userId) {
+  if (!client.reminders) return [];
+  const userReminders = [];
+  for (const [id, rem] of client.reminders) {
+    if (rem.userId === userId) userReminders.push(rem);
+  }
+  return userReminders;
+}
+
+// Delete all reminders for a specific user
+async function deleteUserReminders(client, userId) {
+  if (!client.reminders) return 0;
+  let count = 0;
+  const toDelete = [];
+  for (const [id, rem] of client.reminders) {
+    if (rem.userId === userId) toDelete.push(id);
+  }
+  for (const id of toDelete) {
+    client.reminders.delete(id);
+    if (db) {
+      db.collection('reminders').doc(id).delete().catch(e => console.error(e));
+    }
+    count++;
+  }
+  return count;
+}
+
 module.exports = {
   parseReminderInput,
   createReminder,
   checkAndSendReminders,
-  initReminderService
+  initReminderService,
+  getUserReminders,
+  deleteUserReminders
 };

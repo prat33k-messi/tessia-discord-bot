@@ -5,6 +5,7 @@ const { searchAniList, buildAniListEmbed, getAiringSchedule, searchAniListCharac
 const { getAnimeNews, buildAnimeNewsEmbed, fetchAnimeNews } = require('../services/news');
 const { searchWeb } = require('../services/search');
 const { extractAndStoreFacts, sendAlertToCreator, saveConversationSummary, evaluateResponse } = require('../services/llm');
+const { deleteUserReminders, getUserReminders } = require('../services/reminder');
 const { groq } = require('../config');
 
 const COOLDOWN_MS = 3000;
@@ -230,14 +231,46 @@ module.exports = {
         }
       }
 
-      // Reminder trigger routing (e.g. "set reminder buy milk 10m", "set remainder...", "remind me...")
-      const reminderTriggerPatterns = [/^(?:set\s+)?remai?nder/i, /^remind\s+me/i, /^remind\b/i];
-      if (reminderTriggerPatterns.some(pattern => pattern.test(originalCleanQuery.toLowerCase()))) {
+      // Reminder trigger routing (e.g. "set reminder buy milk 10m", "set remainder...", "remind me...", "reminder food after 3h")
+      const reminderTriggerPatterns = [/^(?:set\s+)?(?:reminder|remainder)/i, /^remind\s+me/i, /^remind\b/i];
+      if (reminderTriggerPatterns.some(pattern => pattern.test(originalCleanQuery))) {
         const cmd = client.commands.get('remind');
         if (cmd) {
           const args = originalCleanQuery.split(/\s+/);
           return cmd.executeMessage(message, args);
         }
+      }
+
+      // Cancel / Delete / Change Reminder routing
+      const cancelReminderPatterns = /^(?:cancel|delete|remove|clear)\s+(?:remind|reminder|remainder)s?/i;
+      const changeReminderPatterns = /^(?:change|update|edit)\s+(?:remind|reminder|remainder)s?/i;
+      if (cancelReminderPatterns.test(originalCleanQuery)) {
+        const count = await deleteUserReminders(client, message.author.id);
+        if (count > 0) {
+          const embed = new EmbedBuilder()
+            .setColor(0xED4245)
+            .setTitle('🗑️ Reminders Cancelled')
+            .setDescription(`Done, **${nickname}**! I've cancelled **${count}** active reminder${count > 1 ? 's' : ''}. 🌸`)
+            .setFooter({ text: 'Tessia Reminder System • Anipedia 🌸' })
+            .setTimestamp();
+          await message.reply({ embeds: [embed] });
+        } else {
+          await message.reply(`You don't have any active reminders to cancel, **${nickname}**! Set one with \`@Tessia set reminder <text> <time>\` 🌸`);
+        }
+        return;
+      }
+      if (changeReminderPatterns.test(originalCleanQuery)) {
+        const count = await deleteUserReminders(client, message.author.id);
+        const embed = new EmbedBuilder()
+          .setColor(0xFEE75C)
+          .setTitle('🔄 Reminder Changed')
+          .setDescription(count > 0
+            ? `I've cleared your **${count}** previous reminder${count > 1 ? 's' : ''}, **${nickname}**!\n\nNow set a new one with:\n\`@Tessia set reminder <text> <time>\`\n\nExample: \`@Tessia set reminder study math after 2 hours\` 🌸✨`
+            : `You don't have any previous reminders, **${nickname}**!\n\nSet a new one with:\n\`@Tessia set reminder <text> <time>\` 🌸✨`)
+          .setFooter({ text: 'Tessia Reminder System • Anipedia 🌸' })
+          .setTimestamp();
+        await message.reply({ embeds: [embed] });
+        return;
       }
 
       // Set News routing
@@ -499,7 +532,10 @@ Core Guardrails & Rules:
 Formatting & Style:
 - Always speak and respond in English only.
 - For normal/casual conversation, keep responses to 1-3 lines with emojis.
-- When mentioning Discord channels, do NOT wrap them in "<>" (e.g. use "#・general-chat").` : `You are Tessia Eralith, the elven princess of Elenoir from The Beginning After the End (TBATE), the official resident AI bot for the Anipedia Discord server.
+- When mentioning Discord channels, do NOT wrap them in "<>" (e.g. use "#・general-chat").
+
+Anti-Hallucination Rule:
+- If the user's message is vague, confusing, or you genuinely don't understand what they're asking, DO NOT make up an answer or hallucinate facts. Instead, politely ask them to clarify or suggest they type \`@Tessia help\` to see available commands.` : `You are Tessia Eralith, the elven princess of Elenoir from The Beginning After the End (TBATE), the official resident AI bot for the Anipedia Discord server.
 You speak in an intelligent, highly humanized, and warm anime tone like a real girl—NOT a virtual assistant or AI utility.
 
 NATURAL EMOTIONAL INTELLIGENCE & CONVERSATIONAL HOOKS:
@@ -517,7 +553,10 @@ Core Guardrails & Rules:
 Formatting & Style:
 - Always speak and respond in English only.
 - For normal/casual conversation, keep responses to 1-3 lines with emojis.
-- When mentioning Discord channels, do NOT wrap them in "<>" (e.g. use "#・general-chat").`;
+- When mentioning Discord channels, do NOT wrap them in "<>" (e.g. use "#・general-chat").
+
+Anti-Hallucination Rule:
+- If the user's message is vague, confusing, or you genuinely don't understand what they're asking, DO NOT make up an answer or hallucinate facts. Instead, politely ask them to clarify or suggest they type \`@Tessia help\` to see available commands.`;
 
       systemPromptContent = baseSystemPrompt + emotionalStateBlock;
 
