@@ -106,17 +106,25 @@ module.exports = {
       }
 
       if (!cleanQuery) {
-        const existingHistory = client.conversationHistory.get(username);
-        if (existingHistory && existingHistory.length > 0) {
-          cleanQuery = '[continue the conversation naturally based on our chat history]';
+        if (username === '_c0rle0ne') {
+          const aerionGreetings = [
+            "Yes, Aerion-sama? 🌸 What's up! How can I help you today? ✨",
+            "Hii Aerion-sama! 🌸 What's on your mind right now? ✨",
+            "I'm here, Aerion-sama! 🌸 What are we working on or chatting about today? ✨"
+          ];
+          const pick = aerionGreetings[Math.floor(Math.random() * aerionGreetings.length)];
+          await message.reply(pick);
         } else {
-          if (username === '_c0rle0ne') {
-            await message.reply("Yes, Aerion-sama? 🌸 I'm here! What would you like to chat about? ✨");
-          } else {
-            await message.reply(`Hello, ${nickname}! 🌸 How can I help you today? Mention me with a question to start chatting! ✨`);
-          }
-          return;
+          const userGreetings = [
+            `Hey ${nickname}! 🌸 What's up? How can I help you today? ✨`,
+            `Hii ${nickname}! 🌸 What's on your mind today? Ask me anything or let's chat! ✨`,
+            `Hello ${nickname}! 🌸 How's it going? Need any anime recommendations or just hanging out? ✨`,
+            `Yo ${nickname}! 🌸 What's up! What are we talking about today? ✨`
+          ];
+          const pick = userGreetings[Math.floor(Math.random() * userGreetings.length)];
+          await message.reply(pick);
         }
+        return;
       }
 
       // --- 3. Cooldown Check ---
@@ -226,6 +234,12 @@ module.exports = {
       // News Test routing
       if (originalCleanQuery.toLowerCase() === 'news test') {
         const cmd = client.commands.get('newstest');
+        if (cmd) return cmd.executeMessage(message);
+      }
+
+      // Diagnose routing (Tip 5: Ask the LLM for explanation)
+      if (originalCleanQuery.toLowerCase() === 'diagnose' || originalCleanQuery.toLowerCase() === 'diagnostic') {
+        const cmd = client.commands.get('diagnose');
         if (cmd) return cmd.executeMessage(message);
       }
 
@@ -631,7 +645,8 @@ Here's what we've got for you! 🌸
         detectedTerm = cleanQuery;
       }
 
-      // LLM classification fallback
+      // LLM classification fallback (Tip 5: includes reasoning explanation)
+      let classifierReasoning = null;
       if (!detectedIntent) {
         const classification = await groq.chat.completions.create({
           model: 'llama-3.1-8b-instant',
@@ -648,7 +663,8 @@ Intents:
 - "web_search": Asking about real-world facts, current events, or general knowledge needing up-to-date info.
 - "casual_chat": General chatting, greetings, or anything not covered above.
 
-Output ONLY a JSON object: {"intent": "...", "term": "..."}`
+Output a JSON object with your classification AND a brief explanation of why you chose this intent:
+{"intent": "...", "term": "...", "reasoning": "Brief explanation of why this intent was chosen"}`
           }, {
             role: 'user',
             content: cleanQuery
@@ -660,6 +676,12 @@ Output ONLY a JSON object: {"intent": "...", "term": "..."}`
         const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
         detectedIntent = intentResult.intent;
         detectedTerm = intentResult.term || null;
+        classifierReasoning = intentResult.reasoning || null;
+        if (classifierReasoning) {
+          console.log(`[Intent Reasoning] ${detectedIntent}: ${classifierReasoning}`);
+        }
+      } else {
+        classifierReasoning = `Matched by keyword pre-check pattern (fast route, no LLM needed).`;
       }
 
       let toolContext = '';
@@ -829,8 +851,9 @@ Think step-by-step about what they're really asking. Consider their preferences.
       }
 
       // --- Feature #35: Self-Evaluation Quality Control ---
+      let evalResult = null;
       try {
-        const evalResult = await evaluateResponse(botResponse, cleanQuery);
+        evalResult = await evaluateResponse(botResponse, cleanQuery);
         if (evalResult.score < 9) {
           console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
           const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
@@ -856,6 +879,21 @@ Think step-by-step about what they're really asking. Consider their preferences.
       } catch (evalErr) {
         console.warn('[Self-Evaluation] Ignored error:', evalErr.message);
       }
+
+      // --- Feature #36: Store Diagnostic Trace (Tip 5) ---
+      client.lastDiagnostics.set(username, {
+        timestamp: new Date().toISOString(),
+        userQuery: cleanQuery,
+        intent: detectedIntent || 'casual_chat',
+        term: detectedTerm || null,
+        classifierReasoning: classifierReasoning || 'N/A',
+        hadToolContext: toolContext.length > 0,
+        usedReasoning: reasoningContext.length > 0,
+        evalScore: evalResult ? evalResult.score : 'N/A',
+        evalReason: evalResult ? evalResult.reason : 'N/A',
+        selfCorrected: evalResult ? (evalResult.score < 9) : false,
+        responsePreview: botResponse.substring(0, 100)
+      });
 
       // Cleanup function tags
       botResponse = botResponse.replace(/<function=[^>]*>[^<]*<\/function>/g, '').trim();

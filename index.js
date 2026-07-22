@@ -37,6 +37,7 @@ client.preloadedMemories = new Map();
 client.userCooldowns = new Map();
 client.lastResponseOpeners = new Map();
 client.conversationHistory = new Map();
+client.lastDiagnostics = new Map();
 
 // Diagnostic listeners
 client.on('error', (err) => console.error('Discord client error:', err));
