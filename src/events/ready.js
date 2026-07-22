@@ -1,6 +1,7 @@
 const { REST, Routes } = require('discord.js');
 const { db } = require('../config');
 const { checkAndPostNews } = require('../services/news');
+const { initReminderService } = require('../services/reminder');
 
 module.exports = {
   name: 'ready',
@@ -39,6 +40,13 @@ module.exports = {
       } catch (err) {
         console.error("Error preloading AFK statuses:", err);
       }
+    }
+
+    // Initialize Reminder Service
+    try {
+      await initReminderService(client);
+    } catch (err) {
+      console.error("Error initializing reminder service:", err);
     }
 
     // 2. Register Slash Commands globally

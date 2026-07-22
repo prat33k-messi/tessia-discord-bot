@@ -230,6 +230,16 @@ module.exports = {
         }
       }
 
+      // Reminder trigger routing (e.g. "set reminder buy milk 10m", "set remainder...", "remind me...")
+      const reminderTriggerPatterns = [/^(?:set\s+)?remai?nder/i, /^remind\s+me/i, /^remind\b/i];
+      if (reminderTriggerPatterns.some(pattern => pattern.test(originalCleanQuery.toLowerCase()))) {
+        const cmd = client.commands.get('remind');
+        if (cmd) {
+          const args = originalCleanQuery.split(/\s+/);
+          return cmd.executeMessage(message, args);
+        }
+      }
+
       // Set News routing
       if (originalCleanQuery.toLowerCase().startsWith('set news channel')) {
         const cmd = client.commands.get('setnews');

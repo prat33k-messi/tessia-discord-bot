@@ -60,6 +60,7 @@ module.exports = {
             '`@Tessia ping` — Check response speed',
             '`@Tessia profile` — See what I remember about you',
             '`@Tessia afk <reason>` — Go AFK with a reason',
+            '`@Tessia set reminder <text> <time>` — Set a DM reminder (e.g. 10m, 2h)',
           ].join('\n')
         },
         {
