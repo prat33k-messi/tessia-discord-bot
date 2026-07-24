@@ -915,34 +915,36 @@ Think step-by-step about what they're really asking. Consider their preferences.
         }
       }
 
-      // --- Feature #35: Self-Evaluation Quality Control ---
+      // --- Feature #35: Self-Evaluation Quality Control (Only for non-casual, detailed queries) ---
       let evalResult = null;
-      try {
-        evalResult = await evaluateResponse(botResponse, cleanQuery);
-        if (evalResult.score < 9) {
-          console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
-          const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
+      if (detectedIntent && detectedIntent !== 'casual_chat' && cleanQuery.length > 15) {
+        try {
+          evalResult = await evaluateResponse(botResponse, cleanQuery);
+          if (evalResult.score < 9) {
+            console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
+            const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
 
-          const correctionCompletion = await groq.chat.completions.create({
-            model: primaryModel,
-            messages: [
-              { role: 'system', content: systemPromptContent + reasoningContext + toolContext + selfCorrectionContext },
-              ...history,
-              systemReminder
-            ],
-            temperature: 0.7,
-            max_tokens: calculatedMaxTokens,
-            stop: ["<function", "</function"]
-          });
+            const correctionCompletion = await groq.chat.completions.create({
+              model: primaryModel,
+              messages: [
+                { role: 'system', content: systemPromptContent + reasoningContext + toolContext + selfCorrectionContext },
+                ...history,
+                systemReminder
+              ],
+              temperature: 0.7,
+              max_tokens: calculatedMaxTokens,
+              stop: ["<function", "</function"]
+            });
 
-          const correctedResponse = correctionCompletion.choices[0]?.message?.content;
-          if (correctedResponse && correctedResponse.length > 10) {
-            botResponse = correctedResponse;
-            console.log('[Self-Evaluation] Successfully regenerated response using self-correction feedback');
+            const correctedResponse = correctionCompletion.choices[0]?.message?.content;
+            if (correctedResponse && correctedResponse.length > 10) {
+              botResponse = correctedResponse;
+              console.log('[Self-Evaluation] Successfully regenerated response using self-correction feedback');
+            }
           }
+        } catch (evalErr) {
+          console.warn('[Self-Evaluation] Ignored error:', evalErr.message);
         }
-      } catch (evalErr) {
-        console.warn('[Self-Evaluation] Ignored error:', evalErr.message);
       }
 
       // --- Feature #36: Store Diagnostic Trace (Tip 5) ---

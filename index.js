@@ -44,6 +44,13 @@ client.on('error', (err) => console.error('Discord client error:', err));
 client.on('warn', (warning) => console.warn('Discord client warning:', warning));
 client.on('shardError', (err) => console.error('Shard error occurred:', err));
 
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err);
+});
+
 // 4. Dynamic Commands Loader
 const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFolders = fs.readdirSync(commandsPath);
