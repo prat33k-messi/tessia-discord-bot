@@ -56,7 +56,7 @@ async function searchAniList(searchTerm, mediaType = null) {
     const resolvedTerm = ANIME_ALIASES[cleanedSearchTerm.toLowerCase()] || cleanedSearchTerm;
     console.log(`[DEBUG] searchAniList called: searchTerm="${searchTerm}", cleaned="${cleanedSearchTerm}", resolved="${resolvedTerm}"`);
     
-    const typesToTry = mediaType ? [mediaType] : ['MANGA', 'ANIME'];
+    const typesToTry = mediaType ? [mediaType] : ['ANIME', 'MANGA'];
     
     for (const type of typesToTry) {
       try {

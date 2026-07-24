@@ -95,6 +95,20 @@ module.exports = {
 
       let cleanQuery = originalCleanQuery;
 
+      let replyContext = "";
+      if (referencedMessage) {
+        const refAuthor = referencedMessage.member?.displayName || referencedMessage.author.displayName || referencedMessage.author.username;
+        let refContent = referencedMessage.content
+          .replace(botMention, '')
+          .replace(botNicknameMention, '')
+          .trim();
+        if (refContent.length > 300) refContent = refContent.substring(0, 300) + '...';
+        
+        if (refContent) {
+          replyContext = `\n\n[THREAD REPLIED MESSAGE CONTEXT: The user "${nickname}" is replying directly to a previous message by "${refAuthor}": "${refContent}". You MUST address their message in the context of what "${refAuthor}" said. Do NOT hallucinate unmentioned topics, servers, or TBATE lore unless relevant.]`;
+        }
+      }
+
       if (!cleanQuery && referencedMessage) {
         if (referencedMessage.author.id !== client.user.id) {
           cleanQuery = referencedMessage.content
@@ -558,7 +572,7 @@ Formatting & Style:
 Anti-Hallucination Rule:
 - If the user's message is vague, confusing, or you genuinely don't understand what they're asking, DO NOT make up an answer or hallucinate facts. Instead, politely ask them to clarify or suggest they type \`@Tessia help\` to see available commands.`;
 
-      systemPromptContent = baseSystemPrompt + emotionalStateBlock;
+      systemPromptContent = baseSystemPrompt + emotionalStateBlock + replyContext;
 
       // Add user memories
       if (userMemories.length > 0) {
@@ -757,7 +771,8 @@ Output a JSON object with your classification AND a brief explanation of why you
 
       if (detectedIntent && detectedIntent !== 'casual_chat') {
         if (detectedIntent === 'anime_search') {
-          const res = await searchAniList(detectedTerm);
+          const requestedMediaType = /manga|manhwa|manhua|light novel|ln\b/i.test(cleanQuery) ? 'MANGA' : 'ANIME';
+          const res = await searchAniList(detectedTerm, requestedMediaType);
           if (res?.embedData) {
             anilistEmbedData = res.embedData;
             toolContext = `\n\n[VERIFIED ANIME/MANGA/MANHWA DATA - Use this real data to answer. Present it naturally in your Tessia personality. Do NOT mention any data source name. Present info as if you personally know it.]\n${res.contextText}`;
@@ -988,7 +1003,10 @@ Think step-by-step about what they're really asking. Consider their preferences.
       // Send Response
       const replyOptions = {};
       const embeds = [];
-      if (anilistEmbedData) embeds.push(buildAniListEmbed(anilistEmbedData));
+      const detailRequestKeywords = ['more details', 'more detail', 'details', 'full details', 'stats', 'info card', 'embed', 'show details', 'more info', 'full info', 'information card', 'card'];
+      const userWantsEmbed = detailRequestKeywords.some(k => lowerQuery.includes(k));
+
+      if (anilistEmbedData && userWantsEmbed) embeds.push(buildAniListEmbed(anilistEmbedData));
       if (characterEmbedData) embeds.push(buildCharacterEmbed(characterEmbedData));
       if (quoteEmbedData) embeds.push(buildQuoteEmbed(quoteEmbedData));
       if (newsEmbedData) embeds.push(buildAnimeNewsEmbed(newsEmbedData));
