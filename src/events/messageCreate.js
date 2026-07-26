@@ -955,9 +955,8 @@ Output a JSON object with your classification AND a brief explanation of why you
               const retryCompletion = await groq.chat.completions.create({
                 model: primaryModel,
                 messages: [
-                  { role: 'system', content: systemPromptContent + reasoningContext + searchContext },
-                  ...history,
-                  systemReminder
+                  { role: 'system', content: combinedSystemPrompt + searchContext },
+                  ...history
                 ],
                 temperature: 0.7,
                 max_tokens: calculatedMaxTokens,
@@ -987,9 +986,8 @@ Output a JSON object with your classification AND a brief explanation of why you
             const correctionCompletion = await groq.chat.completions.create({
               model: primaryModel,
               messages: [
-                { role: 'system', content: systemPromptContent + reasoningContext + toolContext + selfCorrectionContext },
-                ...history,
-                systemReminder
+                { role: 'system', content: combinedSystemPrompt + selfCorrectionContext },
+                ...history
               ],
               temperature: 0.7,
               max_tokens: calculatedMaxTokens,
@@ -1015,7 +1013,7 @@ Output a JSON object with your classification AND a brief explanation of why you
         term: detectedTerm || null,
         classifierReasoning: classifierReasoning || 'N/A',
         hadToolContext: toolContext.length > 0,
-        usedReasoning: reasoningContext.length > 0,
+        usedReasoning: false,
         evalScore: evalResult ? evalResult.score : 'N/A',
         evalReason: evalResult ? evalResult.reason : 'N/A',
         selfCorrected: evalResult ? (evalResult.score < 9) : false,
