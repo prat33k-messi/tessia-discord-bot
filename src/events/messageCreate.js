@@ -288,6 +288,59 @@ module.exports = {
         return;
       }
 
+      // --- Relay / Send Message Handler ---
+      const relayPatterns = /^(?:tell|send|pass|relay)\s+/i;
+      if (relayPatterns.test(originalCleanQuery)) {
+        let targetUser = message.mentions.users.filter(u => u.id !== client.user.id).first();
+        let targetName = "";
+
+        if (!targetUser) {
+          const words = originalCleanQuery.split(/\s+/);
+          const actionIndex = words.findIndex(w => /^(tell|send|pass|relay)$/i.test(w));
+          if (actionIndex !== -1 && words[actionIndex + 1]) {
+            const candidateName = words[actionIndex + 1].replace(/^@/, '');
+            if (candidateName && candidateName.toLowerCase() !== 'to' && candidateName.toLowerCase() !== 'me') {
+              targetName = candidateName;
+              if (message.guild) {
+                const member = message.guild.members.cache.find(m => 
+                  m.user.username.toLowerCase().includes(candidateName.toLowerCase()) || 
+                  (m.nickname && m.nickname.toLowerCase().includes(candidateName.toLowerCase())) ||
+                  (m.displayName && m.displayName.toLowerCase().includes(candidateName.toLowerCase()))
+                );
+                if (member) {
+                  targetUser = member.user;
+                }
+              }
+            }
+          }
+        }
+
+        if (targetUser) {
+          let passedMsg = originalCleanQuery;
+          passedMsg = passedMsg
+            .replace(/^(?:tell|send|pass|relay)\s+(?:a\s+)?(?:msg|message)?\s*(?:to\s+)?/i, '')
+            .replace(/<@!?\d+>/g, '')
+            .replace(new RegExp(`^${targetName}\\s*`, 'i'), '')
+            .replace(/^(?:that|saying|message|msg)\s+/i, '')
+            .trim();
+
+          if (!passedMsg) passedMsg = "says hello to you!";
+
+          const targetNickname = message.guild?.members.cache.get(targetUser.id)?.displayName || targetUser.displayName || targetUser.username;
+
+          const deliveryEmbed = new EmbedBuilder()
+            .setColor(0xFF69B4)
+            .setTitle('💌 Message Delivered!')
+            .setDescription(`Hii <@${targetUser.id}>! **${nickname}** asked me to tell you:\n\n> 📌 **"${passedMsg}"** 🌸✨`)
+            .setFooter({ text: 'Tessia Relay System • Spreading positivity 🌸' })
+            .setTimestamp();
+
+          await message.channel.send({ content: `<@${targetUser.id}>`, embeds: [deliveryEmbed] });
+          await message.reply(`Done, **${nickname}**! 💌 I've delivered your message to **${targetNickname}**! 🌸✨`);
+          return;
+        }
+      }
+
       // Set News routing
       if (originalCleanQuery.toLowerCase().startsWith('set news channel')) {
         const cmd = client.commands.get('setnews');

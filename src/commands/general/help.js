@@ -61,6 +61,7 @@ module.exports = {
             '`@Tessia profile` — See what I remember about you',
             '`@Tessia afk <reason>` — Go AFK with a reason',
             '`@Tessia set reminder <text> <time>` — Set a DM reminder (e.g. 10m, 2h)',
+            '`@Tessia tell @user <message>` — Send a message to another user',
           ].join('\n')
         },
         {
