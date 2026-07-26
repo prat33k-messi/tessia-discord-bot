@@ -319,8 +319,14 @@ module.exports = {
           let passedMsg = originalCleanQuery;
           passedMsg = passedMsg
             .replace(/^(?:tell|send|pass|relay)\s+(?:a\s+)?(?:msg|message)?\s*(?:to\s+)?/i, '')
-            .replace(/<@!?\d+>/g, '')
-            .replace(new RegExp(`^${targetName}\\s*`, 'i'), '')
+            .replace(/<@!?\d+>/g, '');
+
+          if (targetName) {
+            const escapedTargetName = targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            passedMsg = passedMsg.replace(new RegExp(`^${escapedTargetName}\\s*`, 'i'), '');
+          }
+
+          passedMsg = passedMsg
             .replace(/^(?:that|saying|message|msg)\s+/i, '')
             .trim();
 

@@ -11,31 +11,37 @@ async function generateGeminiCompletion(systemPrompt, history, currentQuery, nic
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-  // Format history messages for Gemini API
+  // Format history messages for Gemini API ensuring strictly alternating roles
   const formattedContents = [];
 
   if (history && Array.isArray(history)) {
     for (const msg of history) {
-      if (msg.role === 'user') {
+      const role = msg.role === 'assistant' ? 'model' : 'user';
+      if (formattedContents.length > 0 && formattedContents[formattedContents.length - 1].role === role) {
+        // Merge consecutive same-role messages
+        formattedContents[formattedContents.length - 1].parts[0].text += `\n${msg.content}`;
+      } else {
         formattedContents.push({
-          role: 'user',
-          parts: [{ text: msg.content }]
-        });
-      } else if (msg.role === 'assistant') {
-        formattedContents.push({
-          role: 'model',
+          role: role,
           parts: [{ text: msg.content }]
         });
       }
     }
   }
 
-  // Append current user message
+  // Ensure current user message is included at the end
   const userText = `[Username: ${username}, Nickname: ${nickname}]: ${currentQuery}`;
-  formattedContents.push({
-    role: 'user',
-    parts: [{ text: userText }]
-  });
+  if (formattedContents.length === 0) {
+    formattedContents.push({
+      role: 'user',
+      parts: [{ text: userText }]
+    });
+  } else if (formattedContents[formattedContents.length - 1].role === 'model') {
+    formattedContents.push({
+      role: 'user',
+      parts: [{ text: userText }]
+    });
+  }
 
   const requestBody = {
     systemInstruction: {
