@@ -6,6 +6,7 @@ const { getAnimeNews, buildAnimeNewsEmbed, fetchAnimeNews } = require('../servic
 const { searchWeb } = require('../services/search');
 const { extractAndStoreFacts, sendAlertToCreator, saveConversationSummary, evaluateResponse } = require('../services/llm');
 const { deleteUserReminders, getUserReminders } = require('../services/reminder');
+const { generateGeminiCompletion } = require('../services/gemini');
 const { groq } = require('../config');
 
 const COOLDOWN_MS = 3000;
@@ -855,33 +856,49 @@ Think step-by-step about what they're really asking. Consider their preferences.
       const calculatedMaxTokens = isDetailedQuestion ? 2048 : (isBriefQuestion ? 256 : 512);
 
       let botResponse = "";
+      const fullSystemPrompt = systemPromptContent + reasoningContext + toolContext;
+
       try {
-        const completion = await groq.chat.completions.create({
-          model: primaryModel,
-          messages: [
-            { role: 'system', content: systemPromptContent + reasoningContext + toolContext },
-            ...history,
-            systemReminder
-          ],
-          temperature: 0.85,
-          max_tokens: calculatedMaxTokens,
-          stop: ["<function", "</function"]
-        });
-        botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
-      } catch (primaryError) {
-        console.warn(`Primary model (${primaryModel}) failed, falling back to ${fallbackModel}:`, primaryError.message);
-        const fallbackCompletion = await groq.chat.completions.create({
-          model: fallbackModel,
-          messages: [
-            { role: 'system', content: systemPromptContent + reasoningContext + toolContext },
-            ...history,
-            systemReminder
-          ],
-          temperature: 0.7,
-          max_tokens: calculatedMaxTokens,
-          stop: ["<function", "</function"]
-        });
-        botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+        // Primary LLM: Google Gemini 2.5 Flash (Smarter, Humanized, High Reasoning)
+        botResponse = await generateGeminiCompletion(
+          fullSystemPrompt,
+          history,
+          cleanQuery,
+          nickname,
+          username,
+          0.85,
+          calculatedMaxTokens
+        );
+      } catch (geminiError) {
+        console.warn(`Primary Gemini 2.5 Flash failed, falling back to Groq (${primaryModel}):`, geminiError.message);
+        try {
+          const completion = await groq.chat.completions.create({
+            model: primaryModel,
+            messages: [
+              { role: 'system', content: fullSystemPrompt },
+              ...history,
+              systemReminder
+            ],
+            temperature: 0.85,
+            max_tokens: calculatedMaxTokens,
+            stop: ["<function", "</function"]
+          });
+          botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+        } catch (groqError) {
+          console.warn(`Fallback model (${primaryModel}) failed, using ${fallbackModel}:`, groqError.message);
+          const fallbackCompletion = await groq.chat.completions.create({
+            model: fallbackModel,
+            messages: [
+              { role: 'system', content: fullSystemPrompt },
+              ...history,
+              systemReminder
+            ],
+            temperature: 0.7,
+            max_tokens: calculatedMaxTokens,
+            stop: ["<function", "</function"]
+          });
+          botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+        }
       }
 
       botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
