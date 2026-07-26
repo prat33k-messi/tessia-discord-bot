@@ -201,8 +201,8 @@ module.exports = {
         return;
       }
 
-      // Show typing
-      await message.channel.sendTyping();
+      // Show typing non-blockingly
+      message.channel.sendTyping().catch(() => {});
 
       // --- 6. Direct command triggers from mentions ---
       // Reset
@@ -819,44 +819,15 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Final chat generation
-      const complexPatterns = ['compare', 'difference between', 'better', 'worse', 'vs', 'versus', 'pros and cons', 'should i', 'which one', 'rank', 'top 5', 'top 10', 'best', 'analyze', 'explain why', 'how does', 'what makes'];
-      const isComplexQuestion = complexPatterns.some(p => lowerQuery.includes(p)) && cleanQuery.length > 30;
-      
-      let reasoningContext = '';
-      if (isComplexQuestion && userMemories.length > 0) {
-        try {
-          const thinkingCompletion = await groq.chat.completions.create({
-            model: 'llama-3.1-8b-instant',
-            messages: [{
-              role: 'user',
-              content: `You are a reasoning helper. The user "${nickname}" asked: "${cleanQuery}"
-
-Their known preferences: ${userMemories.join(', ')}
-
-Think step-by-step about what they're really asking. Consider their preferences. Write 2-3 bullet points of key insights to help answer their question thoughtfully and personally. Be concise. Output ONLY the bullet points.`
-            }],
-            temperature: 0.3,
-            max_tokens: 200
-          });
-          reasoningContext = thinkingCompletion.choices[0]?.message?.content?.trim() || '';
-          if (reasoningContext) {
-            reasoningContext = `\n\n[Internal Reasoning - Use these insights to give a thoughtful, personalized answer. Do NOT reveal that you "thought about it" or "analyzed" anything. Just naturally incorporate these insights:]\n${reasoningContext}`;
-          }
-        } catch (err) {
-          console.error("Reasoning step error:", err);
-        }
-      }
-
-      // Smart length tokens
+      // Smart length tokens for ultra-fast 1s response speed
       const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me', 'full details', 'detailed info', 'detailed', 'in-depth', 'comprehensive', 'synopsis'];
       const briefKeywords = ['less details', 'less detail', 'brief', 'short', 'summarize', 'summary', 'quick'];
       const isBriefQuestion = briefKeywords.some(k => lowerQuery.includes(k));
       const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k)) && !isBriefQuestion;
-      const calculatedMaxTokens = isDetailedQuestion ? 2048 : (isBriefQuestion ? 256 : 512);
+      const calculatedMaxTokens = isDetailedQuestion ? 1024 : (isBriefQuestion ? 200 : 350);
 
       let botResponse = "";
-      const fullSystemPrompt = systemPromptContent + reasoningContext + toolContext;
+      const fullSystemPrompt = systemPromptContent + toolContext;
 
       try {
         // Primary LLM: Google Gemini 2.5 Flash (Smarter, Humanized, High Reasoning)
