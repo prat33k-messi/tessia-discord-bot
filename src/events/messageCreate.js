@@ -886,12 +886,12 @@ Output a JSON object with your classification AND a brief explanation of why you
       const calculatedMaxTokens = isDetailedQuestion ? 1024 : (isBriefQuestion ? 200 : 350);
 
       let botResponse = "";
-      const fullSystemPrompt = systemPromptContent + toolContext;
+      const combinedSystemPrompt = systemPromptContent + toolContext + "\n\n" + systemReminder.content;
 
       try {
         // Primary LLM: Google Gemini 2.5 Flash (Smarter, Humanized, High Reasoning)
         botResponse = await generateGeminiCompletion(
-          fullSystemPrompt,
+          systemPromptContent + toolContext,
           history,
           cleanQuery,
           nickname,
@@ -905,9 +905,8 @@ Output a JSON object with your classification AND a brief explanation of why you
           const completion = await groq.chat.completions.create({
             model: primaryModel,
             messages: [
-              { role: 'system', content: fullSystemPrompt },
-              ...history,
-              systemReminder
+              { role: 'system', content: combinedSystemPrompt },
+              ...history
             ],
             temperature: 0.85,
             max_tokens: calculatedMaxTokens,
@@ -919,9 +918,8 @@ Output a JSON object with your classification AND a brief explanation of why you
           const fallbackCompletion = await groq.chat.completions.create({
             model: fallbackModel,
             messages: [
-              { role: 'system', content: fullSystemPrompt },
-              ...history,
-              systemReminder
+              { role: 'system', content: combinedSystemPrompt },
+              ...history
             ],
             temperature: 0.7,
             max_tokens: calculatedMaxTokens,
