@@ -67,6 +67,28 @@ module.exports = {
       }
     }
 
+    // --- 3. Make it a Quote Role Guard ---
+    const lowerContent = message.content.toLowerCase();
+    const isQuoteMention = message.mentions.users.some(u => u.username.toLowerCase().includes('quote')) ||
+                           lowerContent.includes('make it a quote') ||
+                           lowerContent.includes('makeitaquote');
+
+    if (isQuoteMention) {
+      const hasRegularRole = message.member?.roles.cache.some(r => {
+        const name = r.name.toLowerCase();
+        return name.includes('regular') || name.includes('admin') || name.includes('mod') || name.includes('staff') || name.includes('owner');
+      }) || message.member?.permissions.has('Administrator');
+
+      if (!hasRegularRole) {
+        try {
+          await message.reply(`G-gomen nasai, **${nickname}**! 🌸 The **Make it a Quote** bot is reserved exclusively for our **Regular** members! Keep chatting and staying active in the server to unlock the Regular role~ ✨`);
+        } catch (e) {
+          console.error("Error sending quote role restriction message:", e);
+        }
+        return;
+      }
+    }
+
     // Check if bot was mentioned or replied to
     const botMention = `<@${client.user.id}>`;
     const botNicknameMention = `<@!${client.user.id}>`;
