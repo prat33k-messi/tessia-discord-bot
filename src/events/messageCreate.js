@@ -69,14 +69,19 @@ module.exports = {
 
     // --- 3. Make it a Quote Role Guard ---
     const lowerContent = message.content.toLowerCase();
-    const isQuoteMention = message.mentions.users.some(u => u.username.toLowerCase().includes('quote')) ||
+    const isQuoteMention = message.mentions.users.some(u => 
+                             u.username.toLowerCase().includes('quote') || 
+                             u.username.toLowerCase().includes('miq') ||
+                             (u.globalName && u.globalName.toLowerCase().includes('quote'))
+                           ) ||
+                           message.mentions.members?.some(m => m.displayName.toLowerCase().includes('quote')) ||
                            lowerContent.includes('make it a quote') ||
                            lowerContent.includes('makeitaquote');
 
     if (isQuoteMention) {
       const hasRegularRole = message.member?.roles.cache.some(r => {
         const name = r.name.toLowerCase();
-        return name.includes('regular') || name.includes('admin') || name.includes('mod') || name.includes('staff') || name.includes('owner');
+        return name.includes('regular') || name.includes('admin') || name.includes('mod') || name.includes('staff') || name.includes('owner') || name.includes('active') || name.includes('veteran') || name.includes('elite') || name.includes('master');
       }) || message.member?.permissions.has('Administrator');
 
       if (!hasRegularRole) {
