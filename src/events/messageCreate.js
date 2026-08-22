@@ -1021,16 +1021,23 @@ Output a JSON object with your classification AND a brief explanation of why you
           botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
         } catch (groqError) {
           console.warn(`Fallback model (${primaryModel}) failed, using ${fallbackModel}:`, groqError.message);
-          const fallbackCompletion = await groq.chat.completions.create({
-            model: fallbackModel,
-            messages: [
-              { role: 'system', content: combinedSystemPrompt },
-              ...history
-            ],
-            temperature: 0.7,
-            max_tokens: calculatedMaxTokens
-          });
-          botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+          try {
+            const fallbackCompletion = await groq.chat.completions.create({
+              model: fallbackModel,
+              messages: [
+                { role: 'system', content: combinedSystemPrompt },
+                ...history
+              ],
+              temperature: 0.7,
+              max_tokens: calculatedMaxTokens
+            });
+            botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+          } catch (finalError) {
+            console.error("All LLM providers (Gemini & Groq) failed:", finalError.message);
+            botResponse = username === '_c0rle0ne'
+              ? "Ah, gomen nasai, Aerion-sama! 🌸 My connection flickered for a second! What were you saying? ✨"
+              : `Ah, gomen nasai, ${nickname}! 🌸 My thoughts flickered for a second! What were you saying? ✨`;
+          }
         }
       }
 
@@ -1057,19 +1064,23 @@ Output a JSON object with your classification AND a brief explanation of why you
             const searchResults = await searchWeb(cleanQuery);
             if (searchResults) {
               const searchContext = `\n\n[CRITICAL INSTRUCTION: Your previous response was uncertain/unhelpful. Here are REAL web search results. You MUST now give an accurate, confident answer using this data. NEVER say "I don't know", "I'm not sure", "I can't help", or suggest checking other sources. YOU are the source — use the data below. Stay in your Tessia personality but answer the question fully.]\n${searchResults}`;
-              const retryCompletion = await groq.chat.completions.create({
-                model: primaryModel,
-                messages: [
-                  { role: 'system', content: combinedSystemPrompt + searchContext },
-                  ...history
-                ],
-                temperature: 0.7,
-                max_tokens: calculatedMaxTokens
-              });
-              const retryResponse = retryCompletion.choices[0]?.message?.content;
-              if (retryResponse && retryResponse.length > 20) {
-                botResponse = retryResponse;
-                console.log('[WebSearch Fallback] Successfully regenerated response with search data');
+              try {
+                const retryCompletion = await groq.chat.completions.create({
+                  model: primaryModel,
+                  messages: [
+                    { role: 'system', content: combinedSystemPrompt + searchContext },
+                    ...history
+                  ],
+                  temperature: 0.7,
+                  max_tokens: calculatedMaxTokens
+                });
+                const retryResponse = retryCompletion.choices[0]?.message?.content;
+                if (retryResponse && retryResponse.length > 20) {
+                  botResponse = retryResponse;
+                  console.log('[WebSearch Fallback] Successfully regenerated response with search data');
+                }
+              } catch (webRetryErr) {
+                console.warn('[WebSearch Fallback LLM] Failed:', webRetryErr.message);
               }
             }
           } catch (fallbackErr) {
@@ -1087,6 +1098,7 @@ Output a JSON object with your classification AND a brief explanation of why you
             console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
             const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
 
+            try {
               const correctionCompletion = await groq.chat.completions.create({
                 model: primaryModel,
                 messages: [
@@ -1097,10 +1109,13 @@ Output a JSON object with your classification AND a brief explanation of why you
                 max_tokens: calculatedMaxTokens
               });
 
-            const correctedResponse = correctionCompletion.choices[0]?.message?.content;
-            if (correctedResponse && correctedResponse.length > 10) {
-              botResponse = correctedResponse;
-              console.log('[Self-Evaluation] Successfully regenerated response using self-correction feedback');
+              const correctedResponse = correctionCompletion.choices[0]?.message?.content;
+              if (correctedResponse && correctedResponse.length > 10) {
+                botResponse = correctedResponse;
+                console.log('[Self-Evaluation] Successfully regenerated response using self-correction feedback');
+              }
+            } catch (corrErr) {
+              console.warn('[Self-Correction LLM] Failed:', corrErr.message);
             }
           }
         } catch (evalErr) {
@@ -1123,10 +1138,11 @@ Output a JSON object with your classification AND a brief explanation of why you
         responsePreview: botResponse.substring(0, 100)
       });
 
-      // Cleanup function tags
-      botResponse = botResponse.replace(/<function=[^>]*>[^<]*<\/function>/g, '').trim();
-      botResponse = botResponse.replace(/<function=[^>]*\/>/g, '').trim();
-      botResponse = botResponse.replace(/<\/?function[^>]*>/g, '').trim();
+      // Cleanup function tags without erasing inner text
+      botResponse = botResponse.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+      botResponse = botResponse.replace(/<function=[^>]*>/gi, '').trim();
+      botResponse = botResponse.replace(/<\/function>/gi, '').trim();
+      botResponse = botResponse.replace(/<function=[^>]*\/>/gi, '').trim();
       botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
 
       // Track response opener
