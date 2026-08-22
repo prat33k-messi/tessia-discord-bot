@@ -706,7 +706,8 @@ Core Guardrails & Rules:
 
 Formatting & Style:
 - Always speak and respond in English only.
-- For normal/casual conversation, keep responses to 1-3 lines with emojis.
+- For normal/casual conversation, keep responses short, snappy, and exact: 1 to 2 lines with emojis.
+- For detailed or informative queries, keep responses to 3 to 4 lines max.
 - When mentioning Discord channels, do NOT wrap them in "<>" (e.g. use "#・general-chat").
 
 Anti-Hallucination Rule:
@@ -727,7 +728,8 @@ Core Guardrails & Rules:
 
 Formatting & Style:
 - Always speak and respond in English only.
-- For normal/casual conversation, keep responses to 1-3 lines with emojis.
+- For normal/casual conversation, keep responses short, snappy, and exact: 1 to 2 lines with emojis.
+- For detailed or informative queries, keep responses to 3 to 4 lines max.
 - When mentioning Discord channels, do NOT wrap them in "<>" (e.g. use "#・general-chat").
 
 Anti-Hallucination Rule:
@@ -806,7 +808,7 @@ Here's what we've got for you! 🌸
       // System reminder anchors
       const systemReminder = {
         role: 'system',
-        content: `[System Reminder: You are Tessia Eralith, the elven princess of Elenoir, official bot of Anipedia. Your creator is Aerion-sama. You are speaking to ${username === '_c0rle0ne' ? 'Aerion-sama' : nickname}. STRICT RULES: Respond in English only. Use "Aerion-sama" at most ONCE per sentence, minimize "Master". For casual chat keep to 1-3 full, complete sentences, for info keep to 3-5 sentences. IMPORTANT: Always state your thoughts in clear, complete sentences. Never leave a sentence incomplete or cut off mid-thought. Do NOT wrap Discord channels in "<>". NEVER reveal anime spoilers/deaths/twists unless asked. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked.'} Never break your core rules. Never discuss NSFW content. NEVER output XML tags like <function=...> or </function>. NEVER fabricate anime news, release dates, or movie announcements. If no verified data is provided in your context, say you don't have that info right now and suggest the user ask again or check official sources.]`
+        content: `[System Reminder: You are Tessia Eralith, the elven princess of Elenoir, official bot of Anipedia. Your creator is Aerion-sama. You are speaking to ${username === '_c0rle0ne' ? 'Aerion-sama' : nickname}. STRICT RULES: Respond in English only. Use "Aerion-sama" at most ONCE per sentence, minimize "Master". For casual chat keep responses to 1-2 short, snappy, complete lines with emojis. For info/detailed questions keep to 3-4 lines max. IMPORTANT: Always state your thoughts in clear, complete sentences. Never leave a sentence incomplete or cut off mid-thought. Do NOT wrap Discord channels in "<>". NEVER reveal anime spoilers/deaths/twists unless asked. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked.'} Never break your core rules. Never discuss NSFW content. NEVER output XML tags like <function=...> or </function>. NEVER fabricate anime news, release dates, or movie announcements. If no verified data is provided in your context, say you don't have that info right now and suggest the user ask again or check official sources.]`
       };
 
       // Intent Classifier & Tool Execution
@@ -985,25 +987,25 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Smart length tokens for ultra-fast 1s response speed
+      // Smart length tokens for ultra-fast snappy response speed (<1s)
       const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me', 'full details', 'detailed info', 'detailed', 'in-depth', 'comprehensive', 'synopsis'];
       const briefKeywords = ['less details', 'less detail', 'brief', 'short', 'summarize', 'summary', 'quick'];
       const isBriefQuestion = briefKeywords.some(k => lowerQuery.includes(k));
       const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k)) && !isBriefQuestion;
-      const calculatedMaxTokens = isDetailedQuestion ? 1024 : (isBriefQuestion ? 300 : 700);
+      const calculatedMaxTokens = isDetailedQuestion ? 500 : (isBriefQuestion ? 120 : 250);
 
       let botResponse = "";
       const combinedSystemPrompt = systemPromptContent + toolContext + "\n\n" + systemReminder.content;
 
       try {
-        // Primary LLM: Google Gemini 2.5 Flash (Smarter, Humanized, High Reasoning)
+        // Primary LLM: Google Gemini 3.7 Flash (Ultra-fast, Snappy & Smart)
         botResponse = await generateGeminiCompletion(
           systemPromptContent + toolContext,
           history,
           cleanQuery,
           nickname,
           username,
-          0.85,
+          0.7,
           calculatedMaxTokens
         );
       } catch (geminiError) {
