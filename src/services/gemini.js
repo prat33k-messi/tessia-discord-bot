@@ -1,15 +1,13 @@
 require('dotenv').config();
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 
 async function generateGeminiCompletion(systemPrompt, history, currentQuery, nickname, username, temperature = 0.85, maxTokens = 1024) {
   const apiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
-  if (!apiKey || !apiKey.startsWith('AIzaSy')) {
-    throw new Error("GEMINI_API_KEY is not configured or invalid (Google AI Studio keys start with 'AIzaSy'). Skipping to Groq.");
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured. Skipping to Groq.");
   }
-
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
   // Format history messages for Gemini API ensuring strictly alternating roles
   const formattedContents = [];
@@ -54,39 +52,47 @@ async function generateGeminiCompletion(systemPrompt, history, currentQuery, nic
     }
   };
 
-  let response;
-  let attempts = 0;
-  const maxAttempts = 3;
+  const modelsToTry = [GEMINI_MODEL, 'gemini-3.5-flash-lite'];
+  let lastError = null;
 
-  while (attempts < maxAttempts) {
-    attempts++;
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
+  for (const model of modelsToTry) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    let attempts = 0;
+    const maxAttempts = 2;
 
-    if (response.ok) break;
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
 
-    const isRateLimitOrOverload = response.status === 429 || response.status === 503;
-    if (isRateLimitOrOverload && attempts < maxAttempts) {
-      console.warn(`[Gemini API] Received HTTP ${response.status}. Retrying attempt ${attempts + 1}/${maxAttempts} in 1500ms...`);
-      await new Promise(res => setTimeout(res, 1500 * attempts));
-      continue;
+        if (response.ok) {
+          const data = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return text;
+        }
+
+        const isRateLimitOrOverload = response.status === 429 || response.status === 503;
+        if (isRateLimitOrOverload && attempts < maxAttempts) {
+          console.warn(`[Gemini API - ${model}] Received HTTP ${response.status}. Retrying in 1200ms...`);
+          await new Promise(res => setTimeout(res, 1200));
+          continue;
+        }
+
+        const errorData = await response.json().catch(() => ({}));
+        lastError = new Error(`Gemini (${model}) Error: ${errorData?.error?.message || `HTTP ${response.status}`}`);
+        break; // Try next model in modelsToTry
+      } catch (networkErr) {
+        lastError = networkErr;
+        break;
+      }
     }
-
-    const errorData = await response.json().catch(() => ({}));
-    const errMessage = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
-    throw new Error(`Gemini API Error: ${errMessage}`);
   }
 
-  const data = await response.json();
-  const candidate = data?.candidates?.[0];
-  if (!candidate || !candidate.content?.parts?.[0]?.text) {
-    throw new Error("Gemini returned empty candidate content.");
-  }
-
-  return candidate.content.parts[0].text;
+  throw lastError || new Error("All Gemini model endpoints failed.");
 }
 
 module.exports = {
