@@ -44,7 +44,7 @@ module.exports = {
         db.collection('afk_status').doc(username).delete().catch(err => console.error('Error deleting AFK from Firestore:', err));
       }
 
-      let welcomeDesc = `Welcome back, **<@${message.author.id}>**! 🌸 You were away for **${duration}** (\`${context.badge}\`).\n\n*AFK status has been automatically cleared.*`;
+      let welcomeDesc = `Welcome back, **<@${message.author.id}>**! 🌸 You were away for **${duration}** (\`${context.badge}\`).`;
 
       const welcomeEmbed = new EmbedBuilder()
         .setColor(0x00FF66) // Neon Emerald
