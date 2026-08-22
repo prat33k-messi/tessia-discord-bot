@@ -298,6 +298,99 @@ function parseRSSItems(xmlText) {
   return items;
 }
 
+// Helper to detect dynamic AFK emoji, color, and context based on reason
+function getAfkContext(reason) {
+  const r = (reason || '').toLowerCase();
+
+  if (/\b(dead|dying|passed out|rip|ded|die|sleep forever|killed|murdered|funeral)\b/i.test(r)) {
+    return {
+      emoji: '💀',
+      badge: 'DEAD / RESTING IN PEACE',
+      color: 0xFF2A6D, // Neon Crimson
+      tagline: 'Gone to the afterlife... RIP 🪦'
+    };
+  }
+  if (/\b(study|studying|exam|test|school|college|university|hw|homework|reading|books|assignment|prep)\b/i.test(r)) {
+    return {
+      emoji: '📚',
+      badge: 'STUDYING & FOCUS MODE',
+      color: 0x00F3FF, // Neon Cyan
+      tagline: 'Hit the books! Do not disturb 📖'
+    };
+  }
+  if (/\b(sleep|sleeping|bed|nap|tired|night|gn|slumber|doze|dreaming)\b/i.test(r)) {
+    return {
+      emoji: '🌙',
+      badge: 'SLEEPING & DREAMING',
+      color: 0x9B59B6, // Neon Violet
+      tagline: 'Catching zzzs in dreamland 🌌'
+    };
+  }
+  if (/\b(food|eat|eating|dinner|lunch|breakfast|cook|cooking|hungry|snack|meal|feasting)\b/i.test(r)) {
+    return {
+      emoji: '🍕',
+      badge: 'EATING & MEAL TIME',
+      color: 0xFF9900, // Neon Amber
+      tagline: 'Grabbing a bite to eat! 🍜'
+    };
+  }
+  if (/\b(game|gaming|play|playing|valorant|roblox|genshin|league|cod|fortnite|minecraft|steam|overwatch)\b/i.test(r)) {
+    return {
+      emoji: '🎮',
+      badge: 'GAMING & IN-GAME',
+      color: 0x00FF66, // Neon Emerald
+      tagline: 'Locked in a high-stakes match! 🕹️'
+    };
+  }
+  if (/\b(work|working|office|busy|job|coding|code|meeting|shift|project)\b/i.test(r)) {
+    return {
+      emoji: '💼',
+      badge: 'WORKING / BUSY',
+      color: 0xFF007F, // Neon Magenta
+      tagline: 'Hustling and grinding... 💻'
+    };
+  }
+  if (/\b(shower|bath|wash|hygiene|bathing)\b/i.test(r)) {
+    return {
+      emoji: '🧼',
+      badge: 'SHOWERING / BATHING',
+      color: 0x3498DB, // Neon Ice Blue
+      tagline: 'Freshening up! 🚿'
+    };
+  }
+  if (/\b(gym|workout|exercise|run|running|lifting|fitness|cardio)\b/i.test(r)) {
+    return {
+      emoji: '🏋️‍♂️',
+      badge: 'AT THE GYM / WORKOUT',
+      color: 0xE74C3C, // Neon Scarlet
+      tagline: 'Breaking a sweat! 💪'
+    };
+  }
+  if (/\b(movie|anime|watch|watching|netflix|stream|cinema|episode)\b/i.test(r)) {
+    return {
+      emoji: '🍿',
+      badge: 'WATCHING / ENTERTAINMENT',
+      color: 0xF1C40F, // Neon Gold
+      tagline: 'Glued to the screen! 📺'
+    };
+  }
+  if (/\b(drive|driving|out|travel|traveling|outside|store|shopping|walk|walking|commute)\b/i.test(r)) {
+    return {
+      emoji: '🚗',
+      badge: 'OUT & ABOUT / TRAVELLING',
+      color: 0x1ABC9C, // Neon Turquoise
+      tagline: 'On the move outside! 🛒'
+    };
+  }
+
+  return {
+    emoji: '✨',
+    badge: 'AFK MODE ACTIVE',
+    color: 0x00F3FF, // Neon Cyan
+    tagline: "I'll let everyone know! 🌸"
+  };
+}
+
 module.exports = {
   ANIME_ALIASES,
   splitMessage,
@@ -308,5 +401,6 @@ module.exports = {
   formatDuration,
   detectAnimeQuery,
   detectWebSearchQuery,
-  parseRSSItems
+  parseRSSItems,
+  getAfkContext
 };

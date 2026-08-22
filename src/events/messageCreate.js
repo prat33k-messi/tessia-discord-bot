@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { db, primaryModel, fallbackModel, maxTokens } = require('../config');
-const { formatDuration, cleanAnimeTerm, cleanCharacterTerm, splitMessage, detectWebSearchQuery } = require('../utils/helpers');
+const { formatDuration, cleanAnimeTerm, cleanCharacterTerm, splitMessage, detectWebSearchQuery, getAfkContext } = require('../utils/helpers');
 const { searchAniList, buildAniListEmbed, getAiringSchedule, searchAniListCharacter, buildCharacterEmbed, getAnimeQuote, buildQuoteEmbed } = require('../services/anilist');
 const { getAnimeNews, buildAnimeNewsEmbed, fetchAnimeNews } = require('../services/news');
 const { searchWeb } = require('../services/search');
@@ -34,18 +34,42 @@ module.exports = {
     if (client.afkUsers.has(username)) {
       const afkData = client.afkUsers.get(username);
       const duration = formatDuration(Date.now() - afkData.timestamp);
+      const context = getAfkContext(afkData.reason);
+      const userAvatar = message.author.displayAvatarURL({ dynamic: true, size: 256 });
+      const missedMentions = afkData.mentions || [];
+
       client.afkUsers.delete(username);
 
       if (db) {
         db.collection('afk_status').doc(username).delete().catch(err => console.error('Error deleting AFK from Firestore:', err));
       }
 
+      let welcomeDesc = `Welcome back, **<@${message.author.id}>**! 🌸 You were away for **${duration}** (\`${context.badge}\`).\n\n*AFK status has been automatically cleared.*`;
+
       const welcomeEmbed = new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle('🎉 Welcome Back!')
-        .setDescription(`Welcome back, **${nickname}**! You were away for **${duration}**.\n\n*AFK status removed.*`)
-        .setFooter({ text: 'Missed you! 🌸' })
+        .setColor(0x00FF66) // Neon Emerald
+        .setTitle(`🎉 Welcome Back, ${nickname}! ✨`)
+        .setThumbnail(userAvatar)
+        .setDescription(welcomeDesc)
+        .setFooter({ text: 'Tessia AFK System • Glad to have you back! 🌸', iconURL: client.user.displayAvatarURL() })
         .setTimestamp();
+
+      if (missedMentions.length > 0) {
+        const topMentions = missedMentions.slice(0, 5);
+        const mentionLines = topMentions.map((m, idx) => {
+          const contentSnippet = m.content ? `*"${m.content.length > 60 ? m.content.substring(0, 60) + '...' : m.content}"*` : '*[No text]*';
+          return `**${idx + 1}.** **@${m.authorName}** in <#${m.channelId}>: ${contentSnippet} — [Jump to Message](${m.messageUrl}) (<t:${Math.floor(m.timestamp / 1000)}:R>)`;
+        });
+
+        if (missedMentions.length > 5) {
+          mentionLines.push(`*...and ${missedMentions.length - 5} more missed pings.*`);
+        }
+
+        welcomeEmbed.addFields({
+          name: `📬 Missed Mentions & Pings (${missedMentions.length})`,
+          value: mentionLines.join('\n')
+        });
+      }
 
       try {
         await message.channel.send({ embeds: [welcomeEmbed] });
@@ -57,11 +81,43 @@ module.exports = {
     // --- 2. Notify when someone mentions an AFK user ---
     if (message.mentions.users.size > 0) {
       for (const [mentionedId, mentionedUser] of message.mentions.users) {
+        if (mentionedUser.bot) continue;
         if (client.afkUsers.has(mentionedUser.username)) {
           const afkData = client.afkUsers.get(mentionedUser.username);
           const ago = formatDuration(Date.now() - afkData.timestamp);
+          const context = getAfkContext(afkData.reason);
+          const avatarUrl = afkData.avatarUrl || mentionedUser.displayAvatarURL({ dynamic: true, size: 256 });
+
+          // Record mention in AFK data
+          if (!afkData.mentions) afkData.mentions = [];
+          afkData.mentions.push({
+            authorName: nickname,
+            authorTag: username,
+            channelId: message.channel.id,
+            channelName: message.channel.name,
+            messageUrl: message.url,
+            content: message.content.replace(`<@${mentionedUser.id}>`, '').replace(`<@!${mentionedUser.id}>`, '').trim(),
+            timestamp: Date.now()
+          });
+
+          const afkNoticeEmbed = new EmbedBuilder()
+            .setColor(context.color)
+            .setTitle(`${context.emoji} ${afkData.nickname || mentionedUser.username} is AFK`)
+            .setThumbnail(avatarUrl)
+            .setDescription(
+              `### 💤 User Status Notice\n\n` +
+              `👤 **User:** <@${mentionedUser.id}>\n` +
+              `🏷️ **State:** \`${context.badge}\`\n` +
+              `📝 **Reason:** *"${afkData.reason}"*\n` +
+              `⏳ **Away Since:** <t:${Math.floor(afkData.timestamp / 1000)}:R> (*${ago} ago*)\n` +
+              `📬 **Recorded Pings:** \`${afkData.mentions.length}\` missed ping(s)\n\n` +
+              `> *${context.tagline}*`
+            )
+            .setFooter({ text: "Tessia AFK System • I'll deliver your message when they return! 🌸", iconURL: client.user.displayAvatarURL() })
+            .setTimestamp();
+
           try {
-            await message.reply(`💤 **${afkData.nickname || mentionedUser.username}** is currently AFK: *${afkData.reason}* (since ${ago} ago)`);
+            await message.reply({ embeds: [afkNoticeEmbed] });
           } catch (e) { /* ignore */ }
         }
       }
