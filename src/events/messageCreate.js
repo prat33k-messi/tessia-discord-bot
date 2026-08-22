@@ -890,7 +890,7 @@ Here's what we've got for you! 🌸
       if (!detectedIntent) {
         try {
           const classification = await groq.chat.completions.create({
-            model: 'llama-3.1-8b-instant',
+            model: 'openai/gpt-oss-20b',
             messages: [{
               role: 'system',
               content: `You are an intent classifier for an anime Discord bot. Classify the user's message into ONE intent.
@@ -985,12 +985,8 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Smart length tokens for ultra-fast snappy response speed (<1s)
-      const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me', 'full details', 'detailed info', 'detailed', 'in-depth', 'comprehensive', 'synopsis'];
-      const briefKeywords = ['less details', 'less detail', 'brief', 'short', 'summarize', 'summary', 'quick'];
-      const isBriefQuestion = briefKeywords.some(k => lowerQuery.includes(k));
-      const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k)) && !isBriefQuestion;
-      const calculatedMaxTokens = isDetailedQuestion ? 600 : (isBriefQuestion ? 150 : 350);
+      // Safe, full token generation headroom (no cutoffs)
+      const calculatedMaxTokens = 1024;
 
       let botResponse = "";
       const combinedSystemPrompt = systemPromptContent + toolContext + "\n\n" + systemReminder.content;

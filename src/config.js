@@ -30,8 +30,8 @@ module.exports = {
   groq,
   db,
   FieldValue,
-  primaryModel: process.env.GROQ_MODEL || 'qwen-2.5-32b',
-  fallbackModel: 'llama-3.1-8b-instant',
+  primaryModel: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+  fallbackModel: 'openai/gpt-oss-20b',
   maxTokens: 1024,
   cooldownMs: 3000,
   maxMemoryLimit: 20

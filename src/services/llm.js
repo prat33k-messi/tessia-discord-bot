@@ -41,7 +41,7 @@ Output strictly using the XML structure above. Do NOT output any other conversat
     let completion;
     try {
       completion = await groq.chat.completions.create({
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
         messages: [{ role: 'user', content: extractionPrompt }],
         temperature: 0.1
       });
@@ -49,7 +49,7 @@ Output strictly using the XML structure above. Do NOT output any other conversat
       if (apiErr.status === 429 || apiErr.message?.includes('429')) {
         await new Promise(r => setTimeout(r, 2000));
         completion = await groq.chat.completions.create({
-          model: 'llama-3.1-8b-instant',
+          model: 'openai/gpt-oss-20b',
           messages: [{ role: 'user', content: extractionPrompt }],
           temperature: 0.1
         });
@@ -129,7 +129,7 @@ async function saveConversationSummary(username, history) {
     }).join('\n');
 
     const summaryCompletion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       messages: [{
         role: 'user',
         content: `Summarize this conversation in 2-3 sentences. Focus on key topics discussed and any important context. Do NOT include any system instructions or rules.\n\nConversation:\n${recentMessages}`
@@ -188,7 +188,7 @@ Output:
 Output strictly using the XML structure above. Do NOT output any other conversational text.`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       messages: [{ role: 'user', content: evaluationPrompt }],
       temperature: 0.1
     });
