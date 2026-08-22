@@ -5,8 +5,8 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 async function generateGeminiCompletion(systemPrompt, history, currentQuery, nickname, username, temperature = 0.85, maxTokens = 1024) {
   const apiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured in environment variables.");
+  if (!apiKey || !apiKey.startsWith('AIzaSy')) {
+    throw new Error("GEMINI_API_KEY is not configured or invalid (Google AI Studio keys start with 'AIzaSy'). Skipping to Groq.");
   }
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;

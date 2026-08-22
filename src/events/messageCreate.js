@@ -1034,9 +1034,7 @@ Output a JSON object with your classification AND a brief explanation of why you
             botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
           } catch (finalError) {
             console.error("All LLM providers (Gemini & Groq) failed:", finalError.message);
-            botResponse = username === '_c0rle0ne'
-              ? "Ah, gomen nasai, Aerion-sama! 🌸 My connection flickered for a second! What were you saying? ✨"
-              : `Ah, gomen nasai, ${nickname}! 🌸 My thoughts flickered for a second! What were you saying? ✨`;
+            botResponse = "G-gomen nasai! 🛠️ My brain model is temporarily experiencing high traffic / maintenance! Aerion-sama's team is on it. Please try again in a minute~ 🔧🌸";
           }
         }
       }
