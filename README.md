@@ -1,6 +1,6 @@
 # Tessia Discord Bot
 
-Tessia is a friendly and highly intelligent AI Discord chatbot powered by the **Groq API** (using the `llama-3.3-70b-versatile` model for excellent memory and response quality) and hosted **24/7 for free**.
+Tessia is a friendly and highly intelligent AI Discord chatbot powered by the **Groq API** (using the `qwen-2.5-32b` model for excellent memory and response quality) and hosted **24/7 for free**.
 
 ---
 
@@ -55,7 +55,7 @@ To verify everything works before uploading to the hosting server:
    ```env
    DISCORD_TOKEN=your_discord_bot_token_here
    GROQ_API_KEY=your_groq_api_key_here
-   GROQ_MODEL=llama-3.3-70b-versatile
+   GROQ_MODEL=qwen-2.5-32b
    PORT=3000
    ```
 4. Start the bot:
@@ -90,7 +90,7 @@ Render is a cloud hosting service that has a free tier. We will use it to host o
    - Add the following keys:
      - `DISCORD_TOKEN` = `(Your copied Discord token)`
      - `GROQ_API_KEY` = `(Your copied Groq API key)`
-     - `GROQ_MODEL` = `llama-3.3-70b-versatile`
+     - `GROQ_MODEL` = `qwen-2.5-32b`
 5. Click **Create Web Service**.
 6. Once deployed, copy your web service URL from the top-left of the page (it will look like `https://tessia-discord-bot-xxxx.onrender.com`).
 

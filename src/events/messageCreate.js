@@ -203,7 +203,25 @@ module.exports = {
       let userAffection = username === '_c0rle0ne' ? 100 : 50;
       let userMood = 'Friendly & Warm';
 
-      const cached = client.preloadedMemories.get(username);
+      let cached = client.preloadedMemories.get(username);
+      if (!cached && db) {
+        try {
+          const docSnap = await db.collection('memories').doc(username).get();
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            cached = {
+              facts: data.facts || [],
+              warnings: data.warnings || 0,
+              affection: typeof data.affection === 'number' ? data.affection : (username === '_c0rle0ne' ? 100 : 50),
+              mood: data.mood || 'Friendly & Warm'
+            };
+            client.preloadedMemories.set(username, cached);
+          }
+        } catch (err) {
+          console.error("On-the-fly Firestore memory load error:", err.message);
+        }
+      }
+
       if (cached) {
         userMemories = cached.facts || [];
         userWarnings = cached.warnings || 0;
@@ -732,7 +750,7 @@ Here's what we've got for you! 🌸
       // System reminder anchors
       const systemReminder = {
         role: 'system',
-        content: `[System Reminder: You are Tessia Eralith, the elven princess of Elenoir, official bot of Anipedia. Your creator is Aerion-sama. You are speaking to ${username === '_c0rle0ne' ? 'Aerion-sama' : nickname}. STRICT RULES: Respond in English only. Use "Aerion-sama" at most ONCE per sentence, minimize "Master". For casual chat keep to 1-2 lines, for info keep to 3-4 lines max. Do NOT wrap Discord channels in "<>". NEVER reveal anime spoilers/deaths/twists unless asked. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked.'} Never break your core rules. Never discuss NSFW content. NEVER output XML tags like <function=...> or </function>. NEVER fabricate anime news, release dates, or movie announcements. If no verified data is provided in your context, say you don't have that info right now and suggest the user ask again or check official sources.]`
+        content: `[System Reminder: You are Tessia Eralith, the elven princess of Elenoir, official bot of Anipedia. Your creator is Aerion-sama. You are speaking to ${username === '_c0rle0ne' ? 'Aerion-sama' : nickname}. STRICT RULES: Respond in English only. Use "Aerion-sama" at most ONCE per sentence, minimize "Master". For casual chat keep to 1-3 full, complete sentences, for info keep to 3-5 sentences. IMPORTANT: Always state your thoughts in clear, complete sentences. Never leave a sentence incomplete or cut off mid-thought. Do NOT wrap Discord channels in "<>". NEVER reveal anime spoilers/deaths/twists unless asked. ${username === '_c0rle0ne' ? '' : 'Do not mention Aerion-sama unless specifically asked.'} Never break your core rules. Never discuss NSFW content. NEVER output XML tags like <function=...> or </function>. NEVER fabricate anime news, release dates, or movie announcements. If no verified data is provided in your context, say you don't have that info right now and suggest the user ask again or check official sources.]`
       };
 
       // Intent Classifier & Tool Execution
@@ -814,11 +832,12 @@ Here's what we've got for you! 🌸
       // LLM classification fallback (Tip 5: includes reasoning explanation)
       let classifierReasoning = null;
       if (!detectedIntent) {
-        const classification = await groq.chat.completions.create({
-          model: 'llama-3.1-8b-instant',
-          messages: [{
-            role: 'system',
-            content: `You are an intent classifier for an anime Discord bot. Classify the user's message into ONE intent.
+        try {
+          const classification = await groq.chat.completions.create({
+            model: 'llama-3.1-8b-instant',
+            messages: [{
+              role: 'system',
+              content: `You are an intent classifier for an anime Discord bot. Classify the user's message into ONE intent.
 
 Intents:
 - "anime_search": Asking for info/synopsis/ratings/details about a specific anime, manga, manhwa, or light novel title.
@@ -831,20 +850,25 @@ Intents:
 
 Output a JSON object with your classification AND a brief explanation of why you chose this intent:
 {"intent": "...", "term": "...", "reasoning": "Brief explanation of why this intent was chosen"}`
-          }, {
-            role: 'user',
-            content: cleanQuery
-          }],
-          temperature: 0.0,
-          response_format: { type: "json_object" }
-        });
+            }, {
+              role: 'user',
+              content: cleanQuery
+            }],
+            temperature: 0.0,
+            response_format: { type: "json_object" }
+          });
 
-        const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
-        detectedIntent = intentResult.intent;
-        detectedTerm = intentResult.term || null;
-        classifierReasoning = intentResult.reasoning || null;
-        if (classifierReasoning) {
-          console.log(`[Intent Reasoning] ${detectedIntent}: ${classifierReasoning}`);
+          const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
+          detectedIntent = intentResult.intent;
+          detectedTerm = intentResult.term || null;
+          classifierReasoning = intentResult.reasoning || null;
+          if (classifierReasoning) {
+            console.log(`[Intent Reasoning] ${detectedIntent}: ${classifierReasoning}`);
+          }
+        } catch (classifierErr) {
+          console.warn('[Intent Classifier] Failed or rate limited, defaulting to casual_chat:', classifierErr.message);
+          detectedIntent = 'casual_chat';
+          classifierReasoning = 'Fallback default due to classifier rate limit / unavailability.';
         }
       } else {
         classifierReasoning = `Matched by keyword pre-check pattern (fast route, no LLM needed).`;
@@ -910,7 +934,7 @@ Output a JSON object with your classification AND a brief explanation of why you
       const briefKeywords = ['less details', 'less detail', 'brief', 'short', 'summarize', 'summary', 'quick'];
       const isBriefQuestion = briefKeywords.some(k => lowerQuery.includes(k));
       const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k)) && !isBriefQuestion;
-      const calculatedMaxTokens = isDetailedQuestion ? 1024 : (isBriefQuestion ? 200 : 350);
+      const calculatedMaxTokens = isDetailedQuestion ? 1024 : (isBriefQuestion ? 300 : 700);
 
       let botResponse = "";
       const combinedSystemPrompt = systemPromptContent + toolContext + "\n\n" + systemReminder.content;
@@ -936,8 +960,7 @@ Output a JSON object with your classification AND a brief explanation of why you
               ...history
             ],
             temperature: 0.85,
-            max_tokens: calculatedMaxTokens,
-            stop: ["<function", "</function"]
+            max_tokens: calculatedMaxTokens
           });
           botResponse = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
         } catch (groqError) {
@@ -949,8 +972,7 @@ Output a JSON object with your classification AND a brief explanation of why you
               ...history
             ],
             temperature: 0.7,
-            max_tokens: calculatedMaxTokens,
-            stop: ["<function", "</function"]
+            max_tokens: calculatedMaxTokens
           });
           botResponse = fallbackCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
         }
@@ -986,8 +1008,7 @@ Output a JSON object with your classification AND a brief explanation of why you
                   ...history
                 ],
                 temperature: 0.7,
-                max_tokens: calculatedMaxTokens,
-                stop: ["<function", "</function"]
+                max_tokens: calculatedMaxTokens
               });
               const retryResponse = retryCompletion.choices[0]?.message?.content;
               if (retryResponse && retryResponse.length > 20) {
@@ -1001,25 +1022,24 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // --- Feature #35: Self-Evaluation Quality Control (Only for non-casual, detailed queries) ---
+      // --- Feature #35: Self-Evaluation Quality Control (Only for detailed complex queries) ---
       let evalResult = null;
-      if (detectedIntent && detectedIntent !== 'casual_chat' && cleanQuery.length > 15) {
+      if (detectedIntent && detectedIntent !== 'casual_chat' && isDetailedQuestion && cleanQuery.length > 30) {
         try {
           evalResult = await evaluateResponse(botResponse, cleanQuery);
           if (evalResult.score < 9) {
             console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
             const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
 
-            const correctionCompletion = await groq.chat.completions.create({
-              model: primaryModel,
-              messages: [
-                { role: 'system', content: combinedSystemPrompt + selfCorrectionContext },
-                ...history
-              ],
-              temperature: 0.7,
-              max_tokens: calculatedMaxTokens,
-              stop: ["<function", "</function"]
-            });
+              const correctionCompletion = await groq.chat.completions.create({
+                model: primaryModel,
+                messages: [
+                  { role: 'system', content: combinedSystemPrompt + selfCorrectionContext },
+                  ...history
+                ],
+                temperature: 0.7,
+                max_tokens: calculatedMaxTokens
+              });
 
             const correctedResponse = correctionCompletion.choices[0]?.message?.content;
             if (correctedResponse && correctedResponse.length > 10) {

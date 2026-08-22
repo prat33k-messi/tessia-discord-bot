@@ -30,7 +30,7 @@ module.exports = {
   groq,
   db,
   FieldValue,
-  primaryModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  primaryModel: process.env.GROQ_MODEL || 'qwen-2.5-32b',
   fallbackModel: 'llama-3.1-8b-instant',
   maxTokens: 1024,
   cooldownMs: 3000,

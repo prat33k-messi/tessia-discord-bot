@@ -30,7 +30,7 @@ Please update and refine the prompt dynamically while keeping it generic and sca
     }
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: primaryModel,
       messages: [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: userContent }

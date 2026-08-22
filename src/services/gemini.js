@@ -54,13 +54,27 @@ async function generateGeminiCompletion(systemPrompt, history, currentQuery, nic
     }
   };
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody)
-  });
+  let response;
+  let attempts = 0;
+  const maxAttempts = 3;
 
-  if (!response.ok) {
+  while (attempts < maxAttempts) {
+    attempts++;
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (response.ok) break;
+
+    const isRateLimitOrOverload = response.status === 429 || response.status === 503;
+    if (isRateLimitOrOverload && attempts < maxAttempts) {
+      console.warn(`[Gemini API] Received HTTP ${response.status}. Retrying attempt ${attempts + 1}/${maxAttempts} in 1500ms...`);
+      await new Promise(res => setTimeout(res, 1500 * attempts));
+      continue;
+    }
+
     const errorData = await response.json().catch(() => ({}));
     const errMessage = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
     throw new Error(`Gemini API Error: ${errMessage}`);

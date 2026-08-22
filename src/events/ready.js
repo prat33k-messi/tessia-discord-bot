@@ -17,7 +17,9 @@ module.exports = {
           const data = doc.data();
           client.preloadedMemories.set(doc.id, {
             facts: data.facts || [],
-            warnings: data.warnings || 0
+            warnings: data.warnings || 0,
+            affection: typeof data.affection === 'number' ? data.affection : 50,
+            mood: data.mood || 'Friendly & Warm'
           });
         });
         console.log(`Preloaded memories for ${client.preloadedMemories.size} users.`);

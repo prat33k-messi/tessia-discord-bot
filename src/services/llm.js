@@ -38,13 +38,27 @@ Output:
 
 Output strictly using the XML structure above. Do NOT output any other conversational text.`;
 
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      messages: [{ role: 'user', content: extractionPrompt }],
-      temperature: 0.1
-    });
+    let completion;
+    try {
+      completion = await groq.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: extractionPrompt }],
+        temperature: 0.1
+      });
+    } catch (apiErr) {
+      if (apiErr.status === 429 || apiErr.message?.includes('429')) {
+        await new Promise(r => setTimeout(r, 2000));
+        completion = await groq.chat.completions.create({
+          model: 'llama-3.1-8b-instant',
+          messages: [{ role: 'user', content: extractionPrompt }],
+          temperature: 0.1
+        });
+      } else {
+        throw apiErr;
+      }
+    }
 
-    const content = completion.choices[0]?.message?.content || "";
+    const content = completion?.choices[0]?.message?.content || "";
     const newFacts = [];
     const matches = [...content.matchAll(/<fact>([\s\S]*?)<\/fact>/g)];
     for (const match of matches) {
@@ -74,11 +88,16 @@ Output strictly using the XML structure above. Do NOT output any other conversat
           lastUpdated: FieldValue.serverTimestamp()
         }, { merge: true });
       }
-      preloadedMemories.set(username, { facts, warnings: preloadedMemories.get(username)?.warnings || 0 });
+      const existingCache = preloadedMemories.get(username) || {};
+      preloadedMemories.set(username, {
+        ...existingCache,
+        facts,
+        warnings: existingCache.warnings || 0
+      });
       console.log(`Updated memories for user ${username}:`, facts);
     }
   } catch (err) {
-    console.error("Error in background memory extraction:", err);
+    console.error("Error in background memory extraction:", err.message);
   }
 }
 
