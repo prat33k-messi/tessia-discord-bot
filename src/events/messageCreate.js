@@ -1170,14 +1170,18 @@ Output a JSON object with your classification AND a brief explanation of why you
 
       if (botResponse.length <= 2000) {
         replyOptions.content = botResponse;
-        await message.reply(replyOptions);
+        await message.reply(replyOptions).catch(async () => {
+          await message.channel.send(replyOptions).catch(console.error);
+        });
       } else {
         const chunks = splitMessage(botResponse, 2000);
         for (let i = 0; i < chunks.length; i++) {
           if (i === 0) {
-            await message.reply({ content: chunks[i], ...(i === 0 ? { embeds: replyOptions.embeds } : {}) });
+            await message.reply({ content: chunks[i], ...(i === 0 ? { embeds: replyOptions.embeds } : {}) }).catch(async () => {
+              await message.channel.send({ content: chunks[i], ...(i === 0 ? { embeds: replyOptions.embeds } : {}) }).catch(console.error);
+            });
           } else {
-            await message.channel.send(chunks[i]);
+            await message.channel.send(chunks[i]).catch(console.error);
           }
         }
       }
@@ -1207,7 +1211,9 @@ Output a JSON object with your classification AND a brief explanation of why you
       } else {
         errorMsg += "An unexpected error occurred! Don't worry, I'll be back to full power soon! Please try again~ 💫🌸";
       }
-      await message.reply(errorMsg);
+      await message.reply(errorMsg).catch(async () => {
+        await message.channel.send(errorMsg).catch(console.error);
+      });
     }
   }
 };
