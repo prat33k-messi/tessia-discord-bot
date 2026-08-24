@@ -87,17 +87,23 @@ for (const file of eventFiles) {
 }
 
 // 6. Log in to Discord
-if (!process.env.DISCORD_TOKEN) {
-  console.error("CRITICAL ERROR: DISCORD_TOKEN is missing in your environment variables!");
+const rawToken = process.env.DISCORD_TOKEN;
+if (!rawToken || rawToken.trim() === '') {
+  console.error("CRITICAL ERROR: DISCORD_TOKEN is missing or empty in your environment variables!");
   process.exit(1);
 }
 
-console.log("Attempting Discord login...");
-client.login(process.env.DISCORD_TOKEN)
-  .then(() => console.log("Discord login successful!"))
+const cleanedToken = rawToken.trim().replace(/^["']|["']$/g, '');
+console.log(`Attempting Discord login (Token length: ${cleanedToken.length}, Prefix: ${cleanedToken.substring(0, 6)}...)...`);
+
+client.login(cleanedToken)
+  .then(() => {
+    console.log("Discord login promise resolved successfully!");
+  })
   .catch(err => {
-    console.error("CRITICAL: Discord login FAILED!", err.message);
-    console.error("Full error:", err);
+    console.error("CRITICAL: Discord login FAILED with error:", err.message);
+    console.error("Error Code:", err.code || 'N/A');
+    console.error("Full error details:", err);
   });
 
 // 7. Keep-alive self-ping every 4 minutes to prevent Render free tier spin-down
