@@ -92,4 +92,16 @@ if (!process.env.DISCORD_TOKEN) {
   process.exit(1);
 }
 
-client.login(process.env.DISCORD_TOKEN);
+console.log("Attempting Discord login...");
+client.login(process.env.DISCORD_TOKEN)
+  .then(() => console.log("Discord login successful!"))
+  .catch(err => {
+    console.error("CRITICAL: Discord login FAILED!", err.message);
+    console.error("Full error:", err);
+  });
+
+// 7. Keep-alive self-ping every 4 minutes to prevent Render free tier spin-down
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://tessia-discord-bot-hebl.onrender.com';
+setInterval(() => {
+  fetch(RENDER_URL).catch(() => {});
+}, 240000); // 4 minutes
