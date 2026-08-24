@@ -10,6 +10,31 @@ const { generateGeminiCompletion } = require('../services/gemini');
 const { groq } = require('../config');
 
 const COOLDOWN_MS = 3000;
+
+// Global request queue — max 2 concurrent LLM requests to prevent API rate limit falls
+let activeRequests = 0;
+const MAX_CONCURRENT = 2;
+const requestQueue = [];
+
+function acquireSlot() {
+  return new Promise(resolve => {
+    if (activeRequests < MAX_CONCURRENT) {
+      activeRequests++;
+      resolve();
+    } else {
+      requestQueue.push(resolve);
+    }
+  });
+}
+
+function releaseSlot() {
+  activeRequests--;
+  if (requestQueue.length > 0) {
+    activeRequests++;
+    const next = requestQueue.shift();
+    next();
+  }
+}
 const nsfwKeywords = [
   "nsfw", "hentai", "porn", "sex", "nude", "naked", "boob", "dick", "pussy", 
   "fuck me", "strip", "lewd", "erotic", "xxx", "orgasm", "fetish", "r34",
@@ -810,6 +835,8 @@ Here's what we've got for you! 🌸
       };
 
       // Intent Classifier & Tool Execution
+      // Acquire a slot in the global queue (max 2 concurrent LLM requests)
+      await acquireSlot();
       let detectedIntent = null;
       let detectedTerm = null;
       const lq = cleanQuery.toLowerCase().trim();
@@ -1208,7 +1235,12 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
+      // Release the global queue slot after all LLM work is done
+      releaseSlot();
+
     } catch (error) {
+      // Always release slot on error too
+      releaseSlot();
       console.error("Error handling message:", error);
       let errorMsg = "G-gomen nasai! 😰 Something unexpected happened! ";
       if (error.message?.includes('rate_limit') || error.status === 429) {
