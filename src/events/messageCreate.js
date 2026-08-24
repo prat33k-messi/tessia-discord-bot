@@ -175,10 +175,8 @@ module.exports = {
       }
     }
 
-    // Check if bot was mentioned or replied to
-    const botMention = `<@${client.user.id}>`;
-    const botNicknameMention = `<@!${client.user.id}>`;
-    const isMentioned = message.content.includes(botMention) || message.content.includes(botNicknameMention);
+    const botMentionRegex = new RegExp(`<@!?${client.user.id}>`, 'g');
+    const isMentioned = message.mentions.has(client.user.id);
 
     let isReplyToBot = false;
     let referencedMessage = null;
@@ -198,8 +196,7 @@ module.exports = {
     try {
       // Clean query
       let originalCleanQuery = message.content
-        .replace(botMention, '')
-        .replace(botNicknameMention, '')
+        .replace(botMentionRegex, '')
         .trim();
 
       let cleanQuery = originalCleanQuery;
@@ -208,8 +205,7 @@ module.exports = {
       if (referencedMessage) {
         const refAuthor = referencedMessage.member?.displayName || referencedMessage.author.displayName || referencedMessage.author.username;
         let refContent = referencedMessage.content
-          .replace(botMention, '')
-          .replace(botNicknameMention, '')
+          .replace(botMentionRegex, '')
           .trim();
         if (refContent.length > 300) refContent = refContent.substring(0, 300) + '...';
         
@@ -221,8 +217,7 @@ module.exports = {
       if (!cleanQuery && referencedMessage) {
         if (referencedMessage.author.id !== client.user.id) {
           cleanQuery = referencedMessage.content
-            .replace(botMention, '')
-            .replace(botNicknameMention, '')
+            .replace(botMentionRegex, '')
             .trim();
         } else {
           cleanQuery = '[continue the conversation naturally based on our chat history]';
