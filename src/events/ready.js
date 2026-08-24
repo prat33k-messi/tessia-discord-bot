@@ -1,4 +1,4 @@
-const { REST, Routes } = require('discord.js');
+const { REST, Routes, ActivityType } = require('discord.js');
 const { db } = require('../config');
 const { checkAndPostNews } = require('../services/news');
 const { initReminderService } = require('../services/reminder');
@@ -7,7 +7,18 @@ module.exports = {
   name: 'ready',
   once: true,
   async execute(client) {
-    console.log(`Logged in as ${client.user.tag}!`);
+    console.log(`>>> Logged in as ${client.user.tag}! <<<`);
+
+    // Set explicit Discord Online presence and status badge
+    try {
+      client.user.setPresence({
+        activities: [{ name: 'over AniPedia 🌸 | @Tessia', type: ActivityType.Watching }],
+        status: 'online'
+      });
+      console.log('Bot presence set to Online (Watching over AniPedia 🌸 | @Tessia)');
+    } catch (presenceErr) {
+      console.error('Error setting bot presence:', presenceErr);
+    }
 
     // 1. Preload memories from Firestore
     if (db) {
