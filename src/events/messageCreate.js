@@ -888,12 +888,17 @@ Here's what we've got for you! 🌸
       // LLM classification fallback (Tip 5: includes reasoning explanation)
       let classifierReasoning = null;
       if (!detectedIntent) {
-        try {
-          const classification = await groq.chat.completions.create({
-            model: 'openai/gpt-oss-20b',
-            messages: [{
-              role: 'system',
-              content: `You are an intent classifier for an anime Discord bot. Classify the user's message into ONE intent.
+        const isShortCasual = cleanQuery.split(/\s+/).length <= 5 && !cleanQuery.includes('?');
+        if (isShortCasual) {
+          detectedIntent = 'casual_chat';
+          classifierReasoning = 'Short conversational message bypassed LLM classifier (fast path).';
+        } else {
+          try {
+            const classification = await groq.chat.completions.create({
+              model: 'openai/gpt-oss-20b',
+              messages: [{
+                role: 'system',
+                content: `You are an intent classifier for an anime Discord bot. Classify the user's message into ONE intent.
 
 Intents:
 - "anime_search": Asking for info/synopsis/ratings/details about a specific anime, manga, manhwa, or light novel title.
@@ -906,25 +911,26 @@ Intents:
 
 Output a JSON object with your classification AND a brief explanation of why you chose this intent:
 {"intent": "...", "term": "...", "reasoning": "Brief explanation of why this intent was chosen"}`
-            }, {
-              role: 'user',
-              content: cleanQuery
-            }],
-            temperature: 0.0,
-            response_format: { type: "json_object" }
-          });
+              }, {
+                role: 'user',
+                content: cleanQuery
+              }],
+              temperature: 0.0,
+              response_format: { type: "json_object" }
+            });
 
-          const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
-          detectedIntent = intentResult.intent;
-          detectedTerm = intentResult.term || null;
-          classifierReasoning = intentResult.reasoning || null;
-          if (classifierReasoning) {
-            console.log(`[Intent Reasoning] ${detectedIntent}: ${classifierReasoning}`);
+            const intentResult = JSON.parse(classification.choices[0]?.message?.content?.trim() || '{"intent":"casual_chat"}');
+            detectedIntent = intentResult.intent;
+            detectedTerm = intentResult.term || null;
+            classifierReasoning = intentResult.reasoning || null;
+            if (classifierReasoning) {
+              console.log(`[Intent Reasoning] ${detectedIntent}: ${classifierReasoning}`);
+            }
+          } catch (classifierErr) {
+            console.warn('[Intent Classifier] Failed or rate limited, defaulting to casual_chat:', classifierErr.message);
+            detectedIntent = 'casual_chat';
+            classifierReasoning = 'Fallback default due to classifier rate limit / unavailability.';
           }
-        } catch (classifierErr) {
-          console.warn('[Intent Classifier] Failed or rate limited, defaulting to casual_chat:', classifierErr.message);
-          detectedIntent = 'casual_chat';
-          classifierReasoning = 'Fallback default due to classifier rate limit / unavailability.';
         }
       } else {
         classifierReasoning = `Matched by keyword pre-check pattern (fast route, no LLM needed).`;
@@ -985,8 +991,10 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Safe, full token generation headroom (no cutoffs)
-      const calculatedMaxTokens = 1024;
+      // Normal token headroom as before (250 tokens for casual, 450 for detailed questions)
+      const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me', 'full details', 'detailed info', 'detailed', 'in-depth', 'comprehensive', 'synopsis'];
+      const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k));
+      const calculatedMaxTokens = isDetailedQuestion ? 450 : 250;
 
       let botResponse = "";
       const combinedSystemPrompt = systemPromptContent + toolContext + "\n\n" + systemReminder.content;
@@ -1037,48 +1045,46 @@ Output a JSON object with your classification AND a brief explanation of why you
 
       botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
 
-      // Smart Web Search Fallback
-      if (!toolContext.includes('[WEB SEARCH RESULTS') && !toolContext.includes('[VERIFIED ANIME')) {
-        const uncertainPhrases = [
-          "i'm not sure", "i don't know", "i'm not certain", "i don't have",
-          "i cannot provide", "i can't provide", "don't have access", "not aware of",
-          "i'm unable", "i am not sure", "i am not certain", "don't have information",
-          "not have real-time", "my knowledge", "my training", "as of my",
-          "i lack", "beyond my", "outside my", "i wouldn't know",
-          "couldn't find", "could not find", "unable to find", "no recent news",
-          "no news updates", "not available right now", "i don't currently",
-          "unfortunately", "i'm afraid", "i apologize but", "suggest checking"
-        ];
-        const lowerResponse = botResponse.toLowerCase();
-        const soundsUncertain = uncertainPhrases.some(phrase => lowerResponse.includes(phrase));
+      // Smart Web Search Fallback (Only for web_search or anime_news intents, never casual chat)
+      if (detectedIntent === 'web_search' || detectedIntent === 'anime_news') {
+        if (!toolContext.includes('[WEB SEARCH RESULTS') && !toolContext.includes('[VERIFIED ANIME')) {
+          const uncertainPhrases = [
+            "i'm not sure", "i don't know", "i'm not certain", "i don't have",
+            "i cannot provide", "i can't provide", "don't have access", "not aware of",
+            "couldn't find", "could not find", "unable to find", "no recent news",
+            "unfortunately", "i'm afraid", "suggest checking"
+          ];
+          const lowerResponse = botResponse.toLowerCase();
+          const soundsUncertain = uncertainPhrases.some(phrase => lowerResponse.includes(phrase));
 
-        if (soundsUncertain) {
-          console.log(`[WebSearch Fallback] Tessia sounded uncertain, auto-searching for: ${cleanQuery}`);
-          try {
-            const searchResults = await searchWeb(cleanQuery);
-            if (searchResults) {
-              const searchContext = `\n\n[CRITICAL INSTRUCTION: Your previous response was uncertain/unhelpful. Here are REAL web search results. You MUST now give an accurate, confident answer using this data. NEVER say "I don't know", "I'm not sure", "I can't help", or suggest checking other sources. YOU are the source — use the data below. Stay in your Tessia personality but answer the question fully.]\n${searchResults}`;
-              try {
-                const retryCompletion = await groq.chat.completions.create({
-                  model: primaryModel,
-                  messages: [
-                    { role: 'system', content: combinedSystemPrompt + searchContext },
-                    ...history
-                  ],
-                  temperature: 0.7,
-                  max_tokens: calculatedMaxTokens
-                });
-                const retryResponse = retryCompletion.choices[0]?.message?.content;
-                if (retryResponse && retryResponse.length > 20) {
-                  botResponse = retryResponse;
-                  console.log('[WebSearch Fallback] Successfully regenerated response with search data');
+          if (soundsUncertain) {
+            console.log(`[WebSearch Fallback] Tessia sounded uncertain, auto-searching for: ${cleanQuery}`);
+            try {
+              const searchResults = await searchWeb(cleanQuery);
+              if (searchResults) {
+                const searchContext = `\n\n[CRITICAL INSTRUCTION: Your previous response was uncertain/unhelpful. Here are REAL web search results. You MUST now give an accurate, confident answer using this data. NEVER say "I don't know", "I'm not sure", "I can't help", or suggest checking other sources. YOU are the source — use the data below. Stay in your Tessia personality but answer the question fully.]\n${searchResults}`;
+                try {
+                  const retryCompletion = await groq.chat.completions.create({
+                    model: primaryModel,
+                    messages: [
+                      { role: 'system', content: combinedSystemPrompt + searchContext },
+                      ...history
+                    ],
+                    temperature: 0.7,
+                    max_tokens: calculatedMaxTokens
+                  });
+                  const retryResponse = retryCompletion.choices[0]?.message?.content;
+                  if (retryResponse && retryResponse.length > 20) {
+                    botResponse = retryResponse;
+                    console.log('[WebSearch Fallback] Successfully regenerated response with search data');
+                  }
+                } catch (webRetryErr) {
+                  console.warn('[WebSearch Fallback LLM] Failed:', webRetryErr.message);
                 }
-              } catch (webRetryErr) {
-                console.warn('[WebSearch Fallback LLM] Failed:', webRetryErr.message);
               }
+            } catch (fallbackErr) {
+              console.warn('[WebSearch Fallback] Failed:', fallbackErr.message);
             }
-          } catch (fallbackErr) {
-            console.warn('[WebSearch Fallback] Failed:', fallbackErr.message);
           }
         }
       }
@@ -1088,7 +1094,7 @@ Output a JSON object with your classification AND a brief explanation of why you
       if (detectedIntent && detectedIntent !== 'casual_chat' && isDetailedQuestion && cleanQuery.length > 30) {
         try {
           evalResult = await evaluateResponse(botResponse, cleanQuery);
-          if (evalResult.score < 9) {
+          if (evalResult.score < 5) {
             console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
             const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
 
@@ -1186,11 +1192,14 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Asynchronous memory/summaries update
+      // Asynchronous memory/summaries update (Only when user shares personal preferences)
       if (db) {
-        extractAndStoreFacts(username, nickname, cleanQuery, userMemories, client.preloadedMemories).catch(err => {
-          console.error("Error in background memory extraction:", err);
-        });
+        const hasFactKeywords = /(?:my name is|i am|i'm|i live in|my favorite|i love|i like|my hobby|my age|i watch|i read)\b/i.test(cleanQuery);
+        if (hasFactKeywords) {
+          extractAndStoreFacts(username, nickname, cleanQuery, userMemories, client.preloadedMemories).catch(err => {
+            console.error("Error in background memory extraction:", err);
+          });
+        }
 
         if (history.length >= 10 && history.length % 10 === 0) {
           saveConversationSummary(username, history).catch(err => {

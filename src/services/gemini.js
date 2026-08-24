@@ -62,12 +62,17 @@ async function generateGeminiCompletion(systemPrompt, history, currentQuery, nic
 
     while (attempts < maxAttempts) {
       attempts++;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
           const data = await response.json();
@@ -77,8 +82,8 @@ async function generateGeminiCompletion(systemPrompt, history, currentQuery, nic
 
         const isRateLimitOrOverload = response.status === 429 || response.status === 503;
         if (isRateLimitOrOverload && attempts < maxAttempts) {
-          console.warn(`[Gemini API - ${model}] Received HTTP ${response.status}. Retrying in 1200ms...`);
-          await new Promise(res => setTimeout(res, 1200));
+          console.warn(`[Gemini API - ${model}] Received HTTP ${response.status}. Retrying in 1000ms...`);
+          await new Promise(res => setTimeout(res, 1000));
           continue;
         }
 
@@ -86,6 +91,7 @@ async function generateGeminiCompletion(systemPrompt, history, currentQuery, nic
         lastError = new Error(`Gemini (${model}) Error: ${errorData?.error?.message || `HTTP ${response.status}`}`);
         break; // Try next model in modelsToTry
       } catch (networkErr) {
+        clearTimeout(timeoutId);
         lastError = networkErr;
         break;
       }
