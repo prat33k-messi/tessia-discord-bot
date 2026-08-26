@@ -355,7 +355,8 @@ module.exports = {
       }
 
       // Profile routing
-      if (originalCleanQuery.toLowerCase() === 'profile' || originalCleanQuery.toLowerCase() === 'about me') {
+      const profileKeywords = ['profile', 'my profile', 'passport', 'my passport', 'about me', 'who am i', 'my info', 'my card', 'card'];
+      if (profileKeywords.includes(originalCleanQuery.toLowerCase())) {
         const cmd = client.commands.get('profile');
         if (cmd) return cmd.executeMessage(message);
       }

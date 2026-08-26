@@ -5,56 +5,38 @@ const KNOWLEDGE_DOCS = [
   {
     id: "server_channels_general",
     category: "channels",
-    keywords: ["general", "general chat", "where to chat", "rules in general", "chatting channel", "main chat"],
-    content: "Channel #・general-chat is for discussing anime, manga, and wholesome general topics. Topics involving 18+, NSFW, excessive violence, gore, and death are strictly forbidden to ensure a safe environment for all members including minors."
-  },
-  {
-    id: "server_channels_media",
-    category: "channels",
-    keywords: ["media share", "share pictures", "photos", "daily life", "post art", "media channel"],
-    content: "Channel #・media-share is where members can share pictures of their daily lives, wholesome artwork, anime photos, and moments. All media must adhere to community guidelines (no NSFW, gore, or violence)."
-  },
-  {
-    id: "server_channels_manga",
-    category: "channels",
-    keywords: ["manga panels", "manga channel", "share manga", "favorite panel", "manga moments"],
-    content: "Channel #・manga-pannels is dedicated to sharing favorite manga panels, iconic panels, theories, and discussion. NSFW and untagged spoiler panels are not permitted."
-  },
-  {
-    id: "server_channels_games",
-    category: "channels",
-    keywords: ["bot games", "games channel", "owo", "negotina", "nekotina", "pokemon", "play games", "game channel"],
-    content: "Channel #・owo and #・bot-games are for playing interactive bot games like OwO, Nekotina, and Pokémon. Spamming bot game commands is allowed in bot game channels, but NSFW and violence are strictly prohibited."
+    keywords: ["general", "general chat", "where to chat", "rules in general", "chatting channel", "main chat", "channels", "server guide"],
+    content: "AniPedia Key Channels:\n🗨️ `#・general-chat` — Anime, manga & friendly general discussions\n📸 `#・media-share` — Daily life photos, anime art & wholesome clips\n📖 `#・manga-pannels` — Favorite manga panels, theories & chapter moments\n🎮 `#・bot-games` & `#・owo` — Play OwO, Pokémon & interactive bot games!"
   },
   {
     id: "server_roles_hierarchy",
     category: "roles",
-    keywords: ["roles", "role hierarchy", "shogun", "royal hand", "ceo", "ranks", "highest role"],
-    content: "The AniPedia role hierarchy: 1. Shogun (The Owner and highest authority). 2. Royal Hand (The CEOs/Executives who manage all operations and users). 3. Moderator (Enforces rules and maintains order). 4. Junior Moderator (Oversees user activity and assists staff). 5. Level Roles (Unlocked by activity)."
+    keywords: ["roles", "role hierarchy", "shogun", "royal hand", "ceo", "ranks", "highest role", "staff roles"],
+    content: "AniPedia Role Hierarchy:\n👑 **Shogun** — Server Owner & Supreme Leader\n💼 **Royal Hands** — CEOs & Executives managing the community\n⚔️ **Moderators** — Enforce rules & keep peace (Sunny, Kyojin)\n🛡️ **Junior Moderators** — Assist staff & oversee chats\n🌟 **Level Roles** — Earned by active chatting, VC & media sharing (check `#server-updates`)!"
   },
   {
     id: "server_staff_members",
     category: "staff",
     keywords: ["creator", "who made server", "owner", "roan", "aerion", "kyojin", "lejitt", "sunny", "staff", "who runs server", "founders"],
-    content: "AniPedia Leaders & Staff: Roan is the Creator of the server, and we are all building this community together. The CEOs and Server Handles are Aerion, Kyojin, and Lejitt. Top Moderators include Sunny and Kyojin. Aerion is also the developer of Tessia."
+    content: "AniPedia Leaders & Founders:\n✨ **Roan** — Server Creator (we are all building this together!)\n💼 **Aerion, Kyojin & Lejitt** — Server CEOs & Handles\n⚔️ **Sunny & Kyojin** — Top Moderators\n🌸 **Aerion-sama** is also the developer of Tessia!"
   },
   {
     id: "server_leveling_perks",
     category: "leveling",
     keywords: ["level up", "levels", "perks", "how to level", "roles", "colors", "vc perks", "server updates"],
-    content: "Users level up in AniPedia by chatting in text channels, being active in Voice Channels (VC), and sharing media. Higher levels unlock exclusive perks, colored name roles, and privileges. Details can be viewed in #server-updates."
+    content: "AniPedia Leveling Perks:\n🌟 Level up by chatting in text channels, hanging out in Voice Channels (VC), and sharing media!\n🎨 Unlocks exclusive perks, colored name roles, and special channel privileges.\n📜 View all tier perks in `#server-updates`!"
   },
   {
     id: "bot_tessia_emillia_lore",
     category: "lore",
     keywords: ["tessia", "emillia", "sister", "who are you", "what do you do", "bot role", "purpose"],
-    content: "Tessia Eralith (elven princess from TBATE) is the big sister and serves as AniPedia's chat companion, anime/manga expert, and future game host. Her sister Emillia handles moderation and administrative enforcement. Together they manage and protect AniPedia."
+    content: "The Sister Duo of AniPedia:\n🌸 **Tessia Eralith** (Big Sister) — Chat companion, anime/manga expert & future game host (developed by Aerion-sama)\n🛡️ **Emillia** (Younger Sister) — Moderation & administrative enforcement\nTogether they protect and guide AniPedia!"
   },
   {
     id: "server_rules_core",
     category: "rules",
     keywords: ["rules", "server rules", "nsfw", "violence", "spoilers", "ban", "kick", "disrespect", "arguing with staff"],
-    content: "AniPedia Core Rules: 1. Absolute zero tolerance for NSFW, 18+ content, gore, violence, and death topics. 2. No spoilers without ||spoiler|| tags. 3. Respect for staff is paramount; staff decisions are final, and disrespecting or arguing with Shogun or Royal Hands can result in an immediate kick or ban. 4. External invite links, advertising, and self-promotion are prohibited. 5. Usernames and profile pictures must be clean and non-violent."
+    content: "AniPedia Core Guidelines:\n🛡️ **Clean Community:** Absolute zero tolerance for NSFW, 18+, gore & violence (safe for minors!)\n👑 **Staff Respect:** Shogun & Royal Hands decisions are final (disrespecting leads to kick/ban)\n🤐 **No Spoilers:** Always wrap plot twists in `||spoiler||` tags\n🚫 **No Promo:** External invite links & bio ads are forbidden\n✨ **Decency:** Clean usernames and profile pictures required."
   }
 ];
 
