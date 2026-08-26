@@ -6,6 +6,7 @@ const { getAnimeNews, buildAnimeNewsEmbed, fetchAnimeNews } = require('../servic
 const { searchWeb } = require('../services/search');
 const { extractAndStoreFacts, sendAlertToCreator, saveConversationSummary, evaluateResponse } = require('../services/llm');
 const { searchAniPediaKnowledge } = require('../services/knowledgeBase');
+const { getVectorRecommendations } = require('../services/recommendation');
 const { deleteUserReminders, getUserReminders } = require('../services/reminder');
 const { generateGeminiCompletion } = require('../services/gemini');
 const { groq } = require('../config');
@@ -901,6 +902,14 @@ Anti-Hallucination Rule:
         detectedIntent = 'anime_quote';
       }
 
+      if (!detectedIntent) {
+        const recKeywords = ['recommend', 'recommendation', 'suggest', 'suggestion', 'what to watch', 'what to read', 'any good anime', 'any anime', 'any manga', 'good anime', 'good manga', 'something to watch', 'something to read', 'similar shows', 'similar to', 'shows like', 'anime like', 'manga like', 'yes suggest'];
+        if (recKeywords.some(k => lq.includes(k))) {
+          detectedIntent = 'recommendation';
+          detectedTerm = cleanQuery;
+        }
+      }
+
       if (!detectedIntent && detectWebSearchQuery(cleanQuery)) {
         detectedIntent = 'web_search';
         detectedTerm = cleanQuery;
@@ -1003,6 +1012,11 @@ Output a JSON object with your classification AND a brief explanation of why you
           if (res) {
             quoteEmbedData = res;
             toolContext = `\n\n[ANIME QUOTE - Present this quote naturally. Use a quote block. A quote embed will be attached.]\nQuote: "${res.quote}"\nCharacter: ${res.character}\nAnime: ${res.anime}`;
+          }
+        } else if (detectedIntent === 'recommendation') {
+          const res = await getVectorRecommendations(cleanQuery);
+          if (res?.contextText) {
+            toolContext = `\n\n${res.contextText}`;
           }
         } else if (detectedIntent === 'web_search') {
           const res = await searchWeb(detectedTerm);
@@ -1177,6 +1191,41 @@ Output a JSON object with your classification AND a brief explanation of why you
       botResponse = botResponse.replace(/<\/function>/gi, '').trim();
       botResponse = botResponse.replace(/<function=[^>]*\/>/gi, '').trim();
       botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
+
+      // Zero-Fall Sentence Completion Guard & Max 4-Line Enforcer
+      const validPunctuation = ['.', '!', '?', '~', '✨', '🌸', '💖', '💫', '🌟', '💥', '🌿', '🎯', '❤️', '🔥', '🎉', '😊', ')', '"', "'", '`'];
+      let cleanedFinal = botResponse.trim();
+
+      // If response ends in an unclosed bold tag like `**`, close it
+      const boldCount = (cleanedFinal.match(/\*\*/g) || []).length;
+      if (boldCount % 2 !== 0) {
+        cleanedFinal += '**';
+      }
+
+      const lastChar = cleanedFinal.slice(-1);
+      const secondLast = cleanedFinal.length > 1 ? cleanedFinal.slice(-2, -1) : '';
+
+      if (!validPunctuation.includes(lastChar) && !validPunctuation.includes(secondLast)) {
+        let lastPunctIndex = -1;
+        for (const p of ['.', '!', '?', '~', '✨', '🌸', '💖', '💫', '🌟', '💥', '🎯', '❤️']) {
+          const idx = cleanedFinal.lastIndexOf(p);
+          if (idx > lastPunctIndex) lastPunctIndex = idx;
+        }
+
+        if (lastPunctIndex > 15) {
+          cleanedFinal = cleanedFinal.substring(0, lastPunctIndex + 1).trim();
+        } else {
+          cleanedFinal += '! ✨';
+        }
+      }
+
+      // Enforce max 4 lines
+      const responseLines = cleanedFinal.split('\n').filter(l => l.trim().length > 0);
+      if (responseLines.length > 4) {
+        cleanedFinal = responseLines.slice(0, 4).join('\n');
+      }
+
+      botResponse = cleanedFinal;
 
       // Track response opener
       const opener = botResponse.substring(0, Math.min(40, botResponse.indexOf('\n') > 0 ? botResponse.indexOf('\n') : 40)).trim();
