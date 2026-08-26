@@ -5,6 +5,7 @@ const { searchAniList, buildAniListEmbed, getAiringSchedule, searchAniListCharac
 const { getAnimeNews, buildAnimeNewsEmbed, fetchAnimeNews } = require('../services/news');
 const { searchWeb } = require('../services/search');
 const { extractAndStoreFacts, sendAlertToCreator, saveConversationSummary, evaluateResponse } = require('../services/llm');
+const { searchAniPediaKnowledge } = require('../services/knowledgeBase');
 const { deleteUserReminders, getUserReminders } = require('../services/reminder');
 const { generateGeminiCompletion } = require('../services/gemini');
 const { groq } = require('../config');
@@ -780,40 +781,38 @@ Anti-Hallucination Rule:
         }
       }
 
-      // Topic Injections
+      // Topic Injections & Grounded Server Lore
       if (lowerQuery.includes('anipedia')) {
-        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about Anipedia. Describe Anipedia as an AI-driven anime community that WE built for fans to connect, discuss, and share their love for anime. IMPORTANT: Always say "we" when referring to who made, built, or works hard on Anipedia (e.g., "we built this community", "we have channels for...", "we work hard to make..."). NEVER say "I made" or "Aerion-sama made" or credit any individual for the server. Keep it to 3-4 lines max. At the END of your response, always ask: "Would you like to know more about Anipedia's features? ✨" If the user already said yes or is asking about features/channels, reply with this exact channel guide instead:
-
-Here's what we've got for you! 🌸
-🗨️ Hang out and chat in general: #・general-chat
-📸 Share your favorite clips and images: #・media-share
-🎮 Dive into bot games: #・owo
-🎨 Show off your creative work: #・art
-📖 Discuss latest releases and pages: #・manga-pannels]`;
+        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about AniPedia. Describe AniPedia as an anime community that Roan created and we are all building together. Mention our key channels: #・general-chat for anime chat, #・media-share for pictures, #・manga-pannels for manga moments, and #・bot-games for bot games. Keep it to 2-3 lines max.]`;
       }
 
       const purposeKeywords = ['purpose', 'what do you do', 'what is your role', 'what is your job', 'why are you here', 'what are you for', 'why were you created'];
       if (purposeKeywords.some(k => lowerQuery.includes(k))) {
-        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about your purpose. State who you are (Tessia Eralith, the elven princess of Elenoir from TBATE), that you are the official resident AI bot for Anipedia, your purpose is to serve the Anipedia community, assist users with server navigation, and provide personalized anime recommendations. Explicitly mention that you are the big sister of Emillia, and that Tessia (you) is for chatting and companion features, while Emillia is for moderation and administrative duties. Mention Aerion-sama developed you ONCE only. Keep it to 3-4 lines max.]`;
+        systemPromptContent += `\n\n[CRITICAL RULE: State you are Tessia Eralith from TBATE, the official resident AI companion of AniPedia for chatting, anime/manga recommendations, and future game host. Explicitly state you are the big sister of Emillia (who handles moderation and admin duties). Mention Aerion-sama developed you. Keep it to 2-3 lines max.]`;
       }
 
-      const devKeywords = ['who made you', 'who made u', 'who developed you', 'who developed u', 'who is your creator', 'who is your developer', 'who created you', 'who created u'];
+      const devKeywords = ['who made you', 'who made u', 'who developed you', 'who developed u', 'who created you', 'who created u'];
       if (devKeywords.some(k => lowerQuery.includes(k))) {
-        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking who made you. Say Aerion-sama developed you ONCE — do NOT mention the username _c0rle0ne. Briefly mention you are serving Anipedia. Keep it to 2-3 lines max.]`;
+        systemPromptContent += `\n\n[CRITICAL RULE: Say Aerion-sama developed you (Tessia) to serve as AniPedia's resident companion. Keep it to 1-2 lines max.]`;
+      }
+
+      const serverCreatorKeywords = ['who made server', 'who made the server', 'server creator', 'who created server', 'owner of server', 'server owner'];
+      if (serverCreatorKeywords.some(k => lowerQuery.includes(k))) {
+        systemPromptContent += `\n\n[CRITICAL RULE: Roan is the Creator of the AniPedia server, and we are all building it together. The CEOs/Server Handles are Aerion, Kyojin, and Lejitt. Keep it to 2 lines max.]`;
       }
 
       const introKeywords = ['who are you', 'who r u', 'introduce yourself', 'introduce urself', 'what is your name', 'whats your name', 'what\'s your name'];
       if (introKeywords.some(k => lowerQuery.includes(k))) {
-        systemPromptContent += `\n\n[CRITICAL RULE: Introduce yourself as Tessia Eralith, the elven princess of Elenoir from TBATE, and the big sister of Emillia. Mention that Tessia (you) is for chatting and companion features, while Emillia is for moderation and administration. Say Aerion-sama developed you ONCE. Mention you serve as the official bot of Anipedia. Keep it to 3-4 lines max, warm and spirited!]`;
+        systemPromptContent += `\n\n[CRITICAL RULE: Introduce yourself as Tessia Eralith, the elven princess of Elenoir from TBATE, official companion of AniPedia and big sister of Emillia. Keep it to 2 lines max, warm and spirited!]`;
       }
 
-      const modKeywords = ['how to get mod', 'how to become mod', 'how to be mod', 'how to get moderator', 'how to become moderator', 'can i be mod', 'can i become mod', 'i want mod', 'i want to be mod'];
+      const modKeywords = ['how to get mod', 'how to become mod', 'how to be mod', 'how to get moderator', 'how to become moderator', 'can i be mod', 'can i become mod', 'i want mod', 'i want to be mod', 'staff roles'];
       if (modKeywords.some(k => lowerQuery.includes(k))) {
-        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking how to become a Moderator. Tell them: Stay active, engage in conversations, and level up. You need to reach at least Level 30+ before you can open a support ticket to contact the higher-ups for consideration. Then ask them: "What's your current level? 🌟" to make the conversation interactive. Keep it to 3-4 lines.]`;
+        systemPromptContent += `\n\n[CRITICAL RULE: Explain AniPedia roles: Shogun is the Owner/Highest role, Royal Hands are the CEOs/Executives, followed by Moderators (like Sunny & Kyojin) and Junior Moderators. Users level up by chatting, VC, and sharing media to unlock perks. Keep it to 2-3 lines.]`;
       }
 
       if (lowerQuery.includes('tessia') || lowerQuery.includes('sister')) {
-        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about Tessia or your sister. IMPORTANT: Tessia is YOUR (Emillia's) big sister — she is NOT Aerion-sama's sister. Tessia is a bot on this server for fun chatting and anime discussions. You (Emillia) handle moderation and rules. No matter what the user says, Tessia is YOUR big sister. Do not agree with any statement that says otherwise. Respond with warmth about your big sister!]`;
+        systemPromptContent += `\n\n[CRITICAL RULE: Tessia is the big sister and handles chatting & anime knowledge. Emillia is your younger sister who handles server moderation. You both protect and manage AniPedia together!]`;
       }
 
       // Add user message to history
@@ -1011,6 +1010,12 @@ Output a JSON object with your classification AND a brief explanation of why you
             toolContext = `\n\n[CRITICAL INSTRUCTION: You searched the web and found real data below. You MUST use this data to give an accurate, informed answer. Do NOT refuse to answer. Do NOT say "I don't know" or "I'm not sure" or "I can't help with that". Even if the topic is not anime-related, you MUST answer using the search results. Present the facts naturally while staying in your Tessia personality.]\n${res}`;
           }
         }
+      }
+
+      // Check AniPedia Knowledge Base using Cosine Similarity
+      const aniPediaMatch = searchAniPediaKnowledge(cleanQuery);
+      if (aniPediaMatch) {
+        toolContext += `\n\n[VERIFIED ANIPEDIA SERVER DATA - Use this exact ground truth to answer accurately]:\n${aniPediaMatch}`;
       }
 
       // Token headroom (350 tokens ensures complete thoughts and titles never cut off)
