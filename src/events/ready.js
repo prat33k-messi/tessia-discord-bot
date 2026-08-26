@@ -80,13 +80,7 @@ module.exports = {
       console.error('Error refreshing slash commands:', error);
     }
 
-    // 3. News Auto-Post Cron
-    setTimeout(() => {
-      checkAndPostNews(client).catch(err => console.error('Initial news check failed:', err));
-    }, 5000);
-
-    setInterval(() => {
-      checkAndPostNews(client).catch(err => console.error('Cron news check failed:', err));
-    }, 1200000); // 20 minutes
+    // 3. News Auto-Post Cron (Disabled - news is only fetched on user request)
+    // Users can still ask '@Tessia news' anytime on demand!
   }
 };
