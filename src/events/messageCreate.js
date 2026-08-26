@@ -1013,10 +1013,10 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Snappy token headroom (150 tokens for 1-2 line casual, 300 for detailed questions)
+      // Token headroom (350 tokens ensures complete thoughts and titles never cut off)
       const detailKeywords = ['explain', 'tell me about', 'what is', 'what are', 'why do', 'why is', 'how does', 'describe', 'compare', 'difference between', 'analyze', 'review', 'recommend me', 'full details', 'detailed info', 'detailed', 'in-depth', 'comprehensive', 'synopsis'];
       const isDetailedQuestion = detailKeywords.some(k => lowerQuery.includes(k));
-      const calculatedMaxTokens = isDetailedQuestion ? 300 : 150;
+      const calculatedMaxTokens = isDetailedQuestion ? 500 : 350;
 
       let botResponse = "";
       const combinedSystemPrompt = systemPromptContent + toolContext + "\n\n" + systemReminder.content;
@@ -1065,10 +1065,10 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Clean stage directions, asterisks roleplay, and replace creator username
+      // Clean ONLY physical action asterisks (preserving anime titles like **Attack on Titan** or *Frieren*)
       botResponse = botResponse
-        .replace(/\*[^*]+\*/g, '')
-        .replace(/\([^)]*(?:smile|chuckle|gasp|clap|tilt|sigh|nod|wink|blush|wave|pout|grin|laugh|stare|giggle)[^)]*\)/gi, '')
+        .replace(/\*(?:[^*]*(?:smile|chuckle|gasp|clap|tilt|sigh|nod|wink|blush|wave|pout|grin|laugh|stare|giggle|whisper|step|look)[^*]*)\*/gi, '')
+        .replace(/\([^)]*(?:smile|chuckle|gasp|clap|tilt|sigh|nod|wink|blush|wave|pout|grin|laugh|stare|giggle|whisper|step|look)[^)]*\)/gi, '')
         .replace(/\s{2,}/g, ' ')
         .replace(/_c0rle0ne/gi, 'Aerion-sama')
         .trim();
