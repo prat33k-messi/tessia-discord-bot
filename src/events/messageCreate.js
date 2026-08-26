@@ -784,8 +784,23 @@ Anti-Hallucination Rule:
       }
 
       // Topic Injections & Grounded Server Lore
-      if (lowerQuery.includes('anipedia')) {
-        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about AniPedia. Describe AniPedia as an anime community that Roan created and we are all building together. Mention our key channels: #・general-chat for anime chat, #・media-share for pictures, #・manga-pannels for manga moments, and #・bot-games for bot games. Keep it to 2-3 lines max.]`;
+      if (lowerQuery.includes('anipedia') || lowerQuery.includes('channels') || lowerQuery.includes('server guide')) {
+        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about AniPedia or channels. Format your response with clean emoji bullet points and line breaks:
+**Welcome to AniPedia!** 🌸✨ (Created by Roan & built together!)
+🗨️ \`#・general-chat\` — Anime, manga & friendly chat
+📸 \`#・media-share\` — Daily life photos & anime art
+📖 \`#・manga-pannels\` — Favorite manga moments & theories
+🎮 \`#・bot-games\` — OwO, Pokémon & fun bot games!]`;
+      }
+
+      if (lowerQuery.includes('rule') || lowerQuery.includes('guideline')) {
+        systemPromptContent += `\n\n[CRITICAL RULE: The user is asking about server rules. Format your response with clean emoji bullet points and line breaks:
+📜 **AniPedia Core Guidelines** 🌸
+🛡️ **Clean Community:** Zero tolerance for NSFW, 18+, gore & violence.
+👑 **Staff Respect:** Shogun & Royal Hands decisions are final.
+🤐 **No Spoilers:** Always wrap plot twists in \`||spoiler||\` tags.
+🚫 **No Promo:** External invite links & ads are forbidden.
+✨ **Decency:** Clean usernames and profile pictures required.]`;
       }
 
       const purposeKeywords = ['purpose', 'what do you do', 'what is your role', 'what is your job', 'why are you here', 'what are you for', 'why were you created'];
@@ -1089,7 +1104,7 @@ Output a JSON object with your classification AND a brief explanation of why you
       botResponse = botResponse
         .replace(/\*(?:[^*]*(?:smile|chuckle|gasp|clap|tilt|sigh|nod|wink|blush|wave|pout|grin|laugh|stare|giggle|whisper|step|look)[^*]*)\*/gi, '')
         .replace(/\([^)]*(?:smile|chuckle|gasp|clap|tilt|sigh|nod|wink|blush|wave|pout|grin|laugh|stare|giggle|whisper|step|look)[^)]*\)/gi, '')
-        .replace(/\s{2,}/g, ' ')
+        .replace(/[^\S\r\n]{2,}/g, ' ')
         .replace(/_c0rle0ne/gi, 'Aerion-sama')
         .trim();
 
@@ -1143,24 +1158,22 @@ Output a JSON object with your classification AND a brief explanation of why you
         try {
           evalResult = await evaluateResponse(botResponse, cleanQuery);
           if (evalResult.score < 5) {
-            console.log(`[Self-Evaluation] Score ${evalResult.score}/10 is below threshold. Regenerating response...`);
-            const selfCorrectionContext = `\n\n[SELF-CORRECTION TRIGGERED - Your previous response scored ${evalResult.score}/10 because: "${evalResult.reason}". Regenerate the response. Instruction to improve: "${evalResult.improvements}". If you can do better, do so now. Keep your Tessia Eralith character voice perfect, remain warm, spirited, and comply fully with all system rules.]`;
-
+            console.warn(`[Self-Correction] Score ${evalResult.score}/10 below threshold. Reason: ${evalResult.reason}. Regenerating...`);
+            const correctionPrompt = `${combinedSystemPrompt}\n\n[CRITICAL SELF-CORRECTION: Your previous draft was evaluated as flawed: "${evalResult.reason}". Re-write your answer to completely fix this issue. Maintain all personality rules.]`;
             try {
               const correctionCompletion = await groq.chat.completions.create({
                 model: primaryModel,
                 messages: [
-                  { role: 'system', content: combinedSystemPrompt + selfCorrectionContext },
+                  { role: 'system', content: correctionPrompt },
                   ...history
                 ],
                 temperature: 0.7,
                 max_tokens: calculatedMaxTokens
               });
-
               const correctedResponse = correctionCompletion.choices[0]?.message?.content;
-              if (correctedResponse && correctedResponse.length > 10) {
+              if (correctedResponse && correctedResponse.length > 20) {
                 botResponse = correctedResponse;
-                console.log('[Self-Evaluation] Successfully regenerated response using self-correction feedback');
+                console.log('[Self-Correction] Applied improved response successfully.');
               }
             } catch (corrErr) {
               console.warn('[Self-Correction LLM] Failed:', corrErr.message);
@@ -1193,7 +1206,7 @@ Output a JSON object with your classification AND a brief explanation of why you
       botResponse = botResponse.replace(/<function=[^>]*\/>/gi, '').trim();
       botResponse = botResponse.replace(/_c0rle0ne/gi, 'Aerion-sama');
 
-      // Zero-Fall Sentence Completion Guard & Max 4-Line Enforcer
+      // Zero-Fall Sentence Completion Guard & Max Line Enforcer
       const validPunctuation = ['.', '!', '?', '~', '✨', '🌸', '💖', '💫', '🌟', '💥', '🌿', '🎯', '❤️', '🔥', '🎉', '😊', ')', '"', "'", '`'];
       let cleanedFinal = botResponse.trim();
 
@@ -1220,10 +1233,13 @@ Output a JSON object with your classification AND a brief explanation of why you
         }
       }
 
-      // Enforce max 4 lines
+      // Enforce max lines: allow up to 6 lines for structured bullet lists, 4 lines for normal chat
+      const hasBulletPoints = cleanedFinal.includes('\n•') || cleanedFinal.includes('\n-') || cleanedFinal.includes('\n🛡️') || cleanedFinal.includes('\n👑') || cleanedFinal.includes('\n🗨️') || cleanedFinal.includes('\n📸') || cleanedFinal.includes('\n✨') || cleanedFinal.includes('\n1.') || cleanedFinal.includes('\n2.');
+      const maxAllowedLines = hasBulletPoints ? 6 : 4;
+
       const responseLines = cleanedFinal.split('\n').filter(l => l.trim().length > 0);
-      if (responseLines.length > 4) {
-        cleanedFinal = responseLines.slice(0, 4).join('\n');
+      if (responseLines.length > maxAllowedLines) {
+        cleanedFinal = responseLines.slice(0, maxAllowedLines).join('\n');
       }
 
       botResponse = cleanedFinal;
