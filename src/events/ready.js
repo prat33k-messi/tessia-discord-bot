@@ -38,18 +38,25 @@ module.exports = {
         console.error("Error preloading memories:", err);
       }
 
-      // Preload AFK statuses
+      // Preload AFK statuses with full mentions and avatarUrl
       try {
         const afkSnapshot = await db.collection('afk_status').get();
         afkSnapshot.forEach(doc => {
           const data = doc.data();
-          client.afkUsers.set(doc.id, {
-            reason: data.reason,
-            timestamp: data.timestamp,
-            nickname: data.nickname
-          });
+          const afkObj = {
+            userId: data.userId || doc.id,
+            username: data.username || doc.id,
+            nickname: data.nickname || data.username || 'User',
+            reason: data.reason || 'No reason given',
+            timestamp: data.timestamp || Date.now(),
+            avatarUrl: data.avatarUrl || null,
+            mentions: data.mentions || []
+          };
+          client.afkUsers.set(doc.id, afkObj);
+          if (data.username) client.afkUsers.set(data.username, afkObj);
+          if (data.userId) client.afkUsers.set(data.userId, afkObj);
         });
-        console.log(`Preloaded AFK statuses for ${client.afkUsers.size} users.`);
+        console.log(`Preloaded AFK statuses for ${afkSnapshot.size} users.`);
       } catch (err) {
         console.error("Error preloading AFK statuses:", err);
       }

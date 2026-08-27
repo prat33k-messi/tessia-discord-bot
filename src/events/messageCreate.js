@@ -58,17 +58,23 @@ module.exports = {
     const channelName = message.channel?.name || "DM";
 
     // --- 1. AFK Return Detection ---
-    if (client.afkUsers.has(username)) {
-      const afkData = client.afkUsers.get(username);
-      const duration = formatDuration(Date.now() - afkData.timestamp);
-      const context = getAfkContext(afkData.reason);
-      const userAvatar = message.author.displayAvatarURL({ dynamic: true, size: 256 });
-      const missedMentions = afkData.mentions || [];
+    const isSettingAfk = (message.content.toLowerCase().startsWith('afk') || message.content.toLowerCase().startsWith('!afk') || (message.mentions.has(client.user.id) && message.content.toLowerCase().includes('afk')));
+    const authorAfkData = client.afkUsers.get(message.author.id) || client.afkUsers.get(username);
 
+    if (authorAfkData && !isSettingAfk) {
+      const duration = formatDuration(Date.now() - authorAfkData.timestamp);
+      const context = getAfkContext(authorAfkData.reason);
+      const userAvatar = authorAfkData.avatarUrl || message.author.displayAvatarURL({ dynamic: true, size: 256 });
+      const missedMentions = authorAfkData.mentions || [];
+
+      // Remove from memory
+      client.afkUsers.delete(message.author.id);
       client.afkUsers.delete(username);
 
+      // Remove from Firestore
       if (db) {
-        db.collection('afk_status').doc(username).delete().catch(err => console.error('Error deleting AFK from Firestore:', err));
+        db.collection('afk_status').doc(message.author.id).delete().catch(() => {});
+        db.collection('afk_status').doc(username).delete().catch(() => {});
       }
 
       let welcomeDesc = `Welcome back, **<@${message.author.id}>**! 🌸 You were away for **${duration}** (\`${context.badge}\`).`;
@@ -82,14 +88,14 @@ module.exports = {
         .setTimestamp();
 
       if (missedMentions.length > 0) {
-        const topMentions = missedMentions.slice(0, 5);
+        const topMentions = missedMentions.slice(0, 6);
         const mentionLines = topMentions.map((m, idx) => {
-          const contentSnippet = m.content ? `*"${m.content.length > 60 ? m.content.substring(0, 60) + '...' : m.content}"*` : '*[No text]*';
+          const contentSnippet = m.content ? `*"${m.content}"*` : '*[Ping / Media]*';
           return `**${idx + 1}.** **@${m.authorName}** in <#${m.channelId}>: ${contentSnippet} — [Jump to Message](${m.messageUrl}) (<t:${Math.floor(m.timestamp / 1000)}:R>)`;
         });
 
-        if (missedMentions.length > 5) {
-          mentionLines.push(`*...and ${missedMentions.length - 5} more missed pings.*`);
+        if (missedMentions.length > 6) {
+          mentionLines.push(`*...and ${missedMentions.length - 6} more missed pings.*`);
         }
 
         welcomeEmbed.addFields({
@@ -105,39 +111,69 @@ module.exports = {
       }
     }
 
-    // --- 2. Notify when someone mentions an AFK user ---
+    // --- 2. Notify when someone mentions or replies to an AFK user ---
+    const usersToCheck = new Map();
+
     if (message.mentions.users.size > 0) {
-      for (const [mentionedId, mentionedUser] of message.mentions.users) {
-        if (mentionedUser.bot) continue;
-        if (client.afkUsers.has(mentionedUser.username)) {
-          const afkData = client.afkUsers.get(mentionedUser.username);
-          const ago = formatDuration(Date.now() - afkData.timestamp);
-          const context = getAfkContext(afkData.reason);
-          const avatarUrl = afkData.avatarUrl || mentionedUser.displayAvatarURL({ dynamic: true, size: 256 });
+      message.mentions.users.forEach(u => {
+        if (!u.bot && u.id !== message.author.id) usersToCheck.set(u.id, u);
+      });
+    }
+
+    // Check if message is a reply to an AFK user
+    if (message.reference && message.reference.messageId) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+        if (refMsg && !refMsg.author.bot && refMsg.author.id !== message.author.id) {
+          usersToCheck.set(refMsg.author.id, refMsg.author);
+        }
+      } catch (refErr) {
+        // ignore fetch error
+      }
+    }
+
+    if (usersToCheck.size > 0) {
+      for (const [targetId, targetUser] of usersToCheck) {
+        const targetAfk = client.afkUsers.get(targetId) || client.afkUsers.get(targetUser.username);
+        if (targetAfk) {
+          const ago = formatDuration(Date.now() - targetAfk.timestamp);
+          const context = getAfkContext(targetAfk.reason);
+          const avatarUrl = targetAfk.avatarUrl || targetUser.displayAvatarURL({ dynamic: true, size: 256 });
+
+          // Clean ping content
+          const cleanPingContent = message.content
+            .replace(new RegExp(`<@!?${targetUser.id}>`, 'g'), '')
+            .trim();
 
           // Record mention in AFK data
-          if (!afkData.mentions) afkData.mentions = [];
-          afkData.mentions.push({
+          if (!targetAfk.mentions) targetAfk.mentions = [];
+          targetAfk.mentions.push({
             authorName: nickname,
             authorTag: username,
             channelId: message.channel.id,
             channelName: message.channel.name,
             messageUrl: message.url,
-            content: message.content.replace(`<@${mentionedUser.id}>`, '').replace(`<@!${mentionedUser.id}>`, '').trim(),
+            content: cleanPingContent.length > 80 ? cleanPingContent.substring(0, 80) + '...' : (cleanPingContent || '[Ping / Media]'),
             timestamp: Date.now()
           });
 
+          // Sync updated mentions to Firestore
+          if (db) {
+            db.collection('afk_status').doc(targetAfk.userId || targetId).set({ mentions: targetAfk.mentions }, { merge: true })
+              .catch(err => console.error('Error syncing AFK mentions to Firestore:', err));
+          }
+
           const afkNoticeEmbed = new EmbedBuilder()
             .setColor(context.color)
-            .setTitle(`${context.emoji} ${afkData.nickname || mentionedUser.username} is AFK`)
+            .setTitle(`${context.emoji} ${targetAfk.nickname || targetUser.username} is currently AFK`)
             .setThumbnail(avatarUrl)
             .setDescription(
-              `### 💤 User Status Notice\n\n` +
-              `👤 **User:** <@${mentionedUser.id}>\n` +
+              `### 💤 **User Status Notice**\n\n` +
+              `👤 **User:** <@${targetUser.id}>\n` +
               `🏷️ **State:** \`${context.badge}\`\n` +
-              `📝 **Reason:** *"${afkData.reason}"*\n` +
-              `⏳ **Away Since:** <t:${Math.floor(afkData.timestamp / 1000)}:R> (*${ago} ago*)\n` +
-              `📬 **Recorded Pings:** \`${afkData.mentions.length}\` missed ping(s)\n\n` +
+              `📝 **Reason:** *"${targetAfk.reason}"*\n` +
+              `⏳ **Away Since:** <t:${Math.floor(targetAfk.timestamp / 1000)}:R> (*${ago} ago*)\n` +
+              `📬 **Recorded Pings:** \`${targetAfk.mentions.length}\` missed ping(s)\n\n` +
               `> *${context.tagline}*`
             )
             .setFooter({ text: "Tessia AFK System • I'll deliver your message when they return! 🌸", iconURL: client.user.displayAvatarURL() })
@@ -145,7 +181,9 @@ module.exports = {
 
           try {
             await message.reply({ embeds: [afkNoticeEmbed] });
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            console.error('AFK mention reply error:', e.message);
+          }
         }
       }
     }
