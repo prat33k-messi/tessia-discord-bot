@@ -9,6 +9,8 @@ const { searchAniPediaKnowledge } = require('../services/knowledgeBase');
 const { getVectorRecommendations } = require('../services/recommendation');
 const { deleteUserReminders, getUserReminders } = require('../services/reminder');
 const { generateGeminiCompletion } = require('../services/gemini');
+const { activePokemonGames, handleCorrectGuess } = require('../services/pokemonGame');
+const { activeAnimeGames, handleCorrectAnimeGuess } = require('../services/animeQuizGame');
 const { groq } = require('../config');
 
 const COOLDOWN_MS = 3000;
@@ -50,6 +52,17 @@ module.exports = {
   async execute(message) {
     // Ignore messages from bots
     if (message.author.bot) return;
+
+    // --- Active Game Channel Chat Interceptor (Zero LLM Tokens!) ---
+    if (activePokemonGames.has(message.channel.id)) {
+      const guessed = await handleCorrectGuess(message.channel.id, message.author, message.member, message.content);
+      if (guessed) return;
+    }
+
+    if (activeAnimeGames.has(message.channel.id)) {
+      const guessed = await handleCorrectAnimeGuess(message.channel.id, message.author, message.member, message.content);
+      if (guessed) return;
+    }
 
     const client = message.client;
     const username = message.author.username;
@@ -402,6 +415,24 @@ module.exports = {
       // AFK trigger routing
       if (originalCleanQuery.toLowerCase().startsWith('afk')) {
         const cmd = client.commands.get('afk');
+        if (cmd) {
+          const args = originalCleanQuery.split(/\s+/).slice(1);
+          return cmd.executeMessage(message, args);
+        }
+      }
+
+      // Pokemon Game trigger (e.g. "@Tessia pokemon" or "@Tessia pokemon 5")
+      if (originalCleanQuery.toLowerCase().startsWith('pokemon') || originalCleanQuery.toLowerCase().includes('whos that pokemon') || originalCleanQuery.toLowerCase().includes("who's that pokemon")) {
+        const cmd = client.commands.get('pokemon-game');
+        if (cmd) {
+          const args = originalCleanQuery.split(/\s+/).slice(1);
+          return cmd.executeMessage(message, args);
+        }
+      }
+
+      // Anime Character Quiz trigger (e.g. "@Tessia animequiz" or "@Tessia anime quiz 10")
+      if (originalCleanQuery.toLowerCase().startsWith('animequiz') || originalCleanQuery.toLowerCase().startsWith('anime quiz') || originalCleanQuery.toLowerCase().startsWith('character quiz')) {
+        const cmd = client.commands.get('anime-quiz');
         if (cmd) {
           const args = originalCleanQuery.split(/\s+/).slice(1);
           return cmd.executeMessage(message, args);
