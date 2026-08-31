@@ -40,9 +40,15 @@ client.conversationHistory = new Map();
 client.lastDiagnostics = new Map();
 
 // Diagnostic listeners
-client.on('error', (err) => console.error('Discord client error:', err));
+client.on('error', (err) => console.error('Discord client error:', err.message));
 client.on('warn', (warning) => console.warn('Discord client warning:', warning));
-client.on('shardError', (err) => console.error('Shard error occurred:', err));
+client.on('shardError', (err) => console.error('Shard error occurred:', err.message));
+client.on('shardDisconnect', (event, id) => {
+  console.warn(`[Shard ${id}] Disconnected from Gateway (Code: ${event.code}). Auto-reconnecting...`);
+  client.login(cleanedToken).catch(err => console.error('Re-login failed after disconnect:', err.message));
+});
+client.on('shardReconnecting', (id) => console.log(`[Shard ${id}] Reconnecting to Gateway...`));
+client.on('shardResume', (id, replayedEvents) => console.log(`[Shard ${id}] Resumed Gateway connection (${replayedEvents} replayed events).`));
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -106,8 +112,11 @@ client.login(cleanedToken)
     console.error("Full error details:", err);
   });
 
-// 7. Keep-alive self-ping every 4 minutes to prevent Render free tier spin-down
-const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://tessia-discord-bot-hebl.onrender.com';
+// 7. Keep-alive self-ping (local + external) every 3 minutes to prevent Render free tier spin-down
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `http://127.0.0.1:${PORT}`;
 setInterval(() => {
-  fetch(RENDER_URL).catch(() => {});
-}, 240000); // 4 minutes
+  fetch(`http://127.0.0.1:${PORT}/`).catch(() => {});
+  if (process.env.RENDER_EXTERNAL_URL) {
+    fetch(process.env.RENDER_EXTERNAL_URL).catch(() => {});
+  }
+}, 180000); // 3 minutes
