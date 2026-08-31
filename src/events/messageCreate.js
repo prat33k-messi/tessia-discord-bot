@@ -228,6 +228,8 @@ module.exports = {
       }
     }
 
+    console.log(`[MSG RECEIVE] Author: ${username}, Content: "${message.content}"`);
+
     const botMentionRegex = new RegExp(`<@!?${client.user.id}>`, 'g');
 
     // Check user mention, role mention (e.g. @Tessia role), or text inclusion of 'tessia'
@@ -250,7 +252,11 @@ module.exports = {
 
     const isMentioned = isUserMentioned || isRoleMentioned || isTextMentioned;
 
-    if (!isMentioned && !isReplyToBot) return;
+    if (!isMentioned && !isReplyToBot) {
+      return;
+    }
+
+    console.log(`[MSG PROCESSING] Processing query from ${username}: "${message.content}"`);
 
     try {
       // Clean query
