@@ -75,7 +75,9 @@ module.exports = {
       commandsJson.push(command.data.toJSON());
     });
 
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    const rawToken = process.env.DISCORD_TOKEN || '';
+    const cleanedToken = rawToken.trim().replace(/^["']|["']$/g, '');
+    const rest = new REST({ version: '10' }).setToken(cleanedToken);
     try {
       console.log('Started refreshing application (/) commands...');
       await rest.put(
