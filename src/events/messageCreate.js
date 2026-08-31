@@ -32,7 +32,7 @@ function acquireSlot() {
 }
 
 function releaseSlot() {
-  activeRequests--;
+  if (activeRequests > 0) activeRequests--;
   if (requestQueue.length > 0) {
     activeRequests++;
     const next = requestQueue.shift();
@@ -229,7 +229,11 @@ module.exports = {
     }
 
     const botMentionRegex = new RegExp(`<@!?${client.user.id}>`, 'g');
-    const isMentioned = message.mentions.has(client.user.id);
+
+    // Check user mention, role mention (e.g. @Tessia role), or text inclusion of 'tessia'
+    const isUserMentioned = message.mentions.has(client.user.id) || message.mentions.users.has(client.user.id);
+    const isRoleMentioned = message.mentions.roles.some(r => r.name.toLowerCase().includes('tessia'));
+    const isTextMentioned = message.content.toLowerCase().includes('tessia');
 
     let isReplyToBot = false;
     let referencedMessage = null;
@@ -244,12 +248,16 @@ module.exports = {
       }
     }
 
+    const isMentioned = isUserMentioned || isRoleMentioned || isTextMentioned;
+
     if (!isMentioned && !isReplyToBot) return;
 
     try {
       // Clean query
       let originalCleanQuery = message.content
         .replace(botMentionRegex, '')
+        .replace(/<@&\d+>/g, '') // Strip role mention tags
+        .replace(/\btessia\b/gi, '') // Strip explicit 'tessia' trigger word
         .trim();
 
       let cleanQuery = originalCleanQuery;
