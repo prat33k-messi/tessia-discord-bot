@@ -228,14 +228,8 @@ module.exports = {
       }
     }
 
-    console.log(`[MSG RECEIVE] Author: ${username}, Content: "${message.content}"`);
-
     const botMentionRegex = new RegExp(`<@!?${client.user.id}>`, 'g');
-
-    // Check user mention, role mention (e.g. @Tessia role), or text inclusion of 'tessia'
-    const isUserMentioned = message.mentions.has(client.user.id) || message.mentions.users.has(client.user.id);
-    const isRoleMentioned = message.mentions.roles.some(r => r.name.toLowerCase().includes('tessia'));
-    const isTextMentioned = message.content.toLowerCase().includes('tessia');
+    const isMentioned = message.mentions.has(client.user.id);
 
     let isReplyToBot = false;
     let referencedMessage = null;
@@ -250,20 +244,15 @@ module.exports = {
       }
     }
 
-    const isMentioned = isUserMentioned || isRoleMentioned || isTextMentioned;
+    if (!isMentioned && !isReplyToBot) return;
 
-    if (!isMentioned && !isReplyToBot) {
-      return;
-    }
+    console.log(`[MSG PROCESSING] Processing query from ${username}: "${message.content.substring(0, 80)}"`);
 
-    console.log(`[MSG PROCESSING] Processing query from ${username}: "${message.content}"`);
-
+    let slotAcquired = false; // Guard flag for Bug #4 fix
     try {
       // Clean query
       let originalCleanQuery = message.content
         .replace(botMentionRegex, '')
-        .replace(/<@&\d+>/g, '') // Strip role mention tags
-        .replace(/\btessia\b/gi, '') // Strip explicit 'tessia' trigger word
         .trim();
 
       let cleanQuery = originalCleanQuery;
@@ -931,6 +920,7 @@ Anti-Hallucination Rule:
       // Intent Classifier & Tool Execution
       // Acquire a slot in the global queue (max 2 concurrent LLM requests)
       await acquireSlot();
+      slotAcquired = true;
       let detectedIntent = null;
       let detectedTerm = null;
       const lq = cleanQuery.toLowerCase().trim();
@@ -1391,11 +1381,11 @@ Output a JSON object with your classification AND a brief explanation of why you
       }
 
       // Release the global queue slot after all LLM work is done
-      releaseSlot();
+      if (slotAcquired) releaseSlot();
 
     } catch (error) {
-      // Always release slot on error too
-      releaseSlot();
+      // Only release slot if we actually acquired one
+      if (slotAcquired) releaseSlot();
       console.error("Error handling message:", error);
       let errorMsg = "G-gomen nasai! 😰 Something unexpected happened! ";
       if (error.message?.includes('rate_limit') || error.status === 429) {
