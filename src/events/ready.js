@@ -76,7 +76,7 @@ module.exports = {
     });
 
     const rawToken = process.env.DISCORD_TOKEN || '';
-    const cleanedToken = rawToken.trim().replace(/^["']|["']$/g, '');
+    const cleanedToken = rawToken.replace(/[\r\n\s"']/g, '');
     const rest = new REST({ version: '10' }).setToken(cleanedToken);
     try {
       console.log('Started refreshing application (/) commands...');

@@ -97,7 +97,7 @@ if (!rawToken || rawToken.trim() === '') {
   process.exit(1);
 }
 
-const cleanedToken = rawToken.trim().replace(/^["']|["']$/g, '');
+const cleanedToken = rawToken.replace(/[\r\n\s"']/g, '');
 console.log(`Attempting Discord login (Token length: ${cleanedToken.length}, Prefix: ${cleanedToken.substring(0, 6)}...)...`);
 
 client.login(cleanedToken)
